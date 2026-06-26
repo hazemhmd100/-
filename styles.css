@@ -658,6 +658,18 @@ h3 {
   border-color: var(--danger);
 }
 
+.table-merge-button {
+  background: #eef7ff;
+  color: #20608a;
+  border-color: rgba(32, 96, 138, 0.25);
+}
+
+.table-merge-button:hover {
+  background: #20608a;
+  color: #fff;
+  border-color: #20608a;
+}
+
 .tables-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -701,9 +713,9 @@ h3 {
 .table-button .table-customer {
   color: var(--ink);
   font-weight: 800;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .table-button .table-meta {
@@ -960,6 +972,33 @@ h3 {
 .pos-customer-account-card.is-new {
   border-style: dashed;
   background: rgba(30, 108, 120, 0.06);
+}
+
+/* الوضع الليلي: كرت حساب العميل بشاشة البيع */
+html[data-theme="dark"] .pos-customer-account-card {
+  background: linear-gradient(180deg, rgba(24, 37, 45, 0.98), rgba(14, 24, 30, 0.98)) !important;
+  border-color: var(--line) !important;
+}
+html[data-theme="dark"] .pos-customer-account-card.is-debt {
+  background: linear-gradient(180deg, rgba(255, 147, 133, 0.14), rgba(46, 18, 16, 0.5)) !important;
+  border-color: rgba(255, 147, 133, 0.34) !important;
+}
+html[data-theme="dark"] .pos-customer-account-card.is-credit {
+  background: linear-gradient(180deg, rgba(114, 227, 168, 0.14), rgba(16, 40, 28, 0.5)) !important;
+  border-color: rgba(114, 227, 168, 0.32) !important;
+}
+html[data-theme="dark"] .pos-customer-account-card.is-new {
+  background: rgba(27, 188, 178, 0.08) !important;
+  border-color: rgba(27, 188, 178, 0.3) !important;
+}
+html[data-theme="dark"] .pos-customer-account-card.is-debt .pos-customer-account-side > span {
+  color: #ffb6aa !important;
+  background: rgba(255, 147, 133, 0.16) !important;
+}
+html[data-theme="dark"] .pos-customer-account-card.is-credit .pos-customer-account-side > span,
+html[data-theme="dark"] .pos-customer-account-card.is-clear .pos-customer-account-side > span {
+  color: #7eecb0 !important;
+  background: rgba(114, 227, 168, 0.16) !important;
 }
 
 .search-row {
@@ -1798,6 +1837,19 @@ h3 {
   color: var(--success);
 }
 
+/* الوضع الليلي: ألوان نصوص حالات الطلب/الحساب (كانت غامقة على غامق) */
+html[data-theme="dark"] .status-pill.is-occupied {
+  color: #f0cd7a !important;
+}
+html[data-theme="dark"] .customer-account.is-projected-debt .customer-account-title strong,
+html[data-theme="dark"] .customer-account.is-debt-impact .customer-account-grid span:nth-child(2) b {
+  color: #ffb6aa !important;
+}
+html[data-theme="dark"] .customer-account.is-projected-credit .customer-account-title strong,
+html[data-theme="dark"] .customer-account.is-credit-impact .customer-account-grid span:nth-child(2) b {
+  color: #c8c5ff !important;
+}
+
 .customer-account-note {
   padding: 8px;
   border-radius: 8px;
@@ -1995,6 +2047,12 @@ h3 {
   background: #edf8f0;
   color: var(--success);
   border-color: rgba(40, 114, 79, 0.16);
+}
+
+.balance-badge.cancelled {
+  background: #f1f3f5;
+  color: #59636e;
+  border-color: rgba(89, 99, 110, 0.2);
 }
 
 .customer-kpis {
@@ -3281,9 +3339,9 @@ h3 {
 
 .invoice-summary-bar {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
-  align-items: center;
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  align-items: stretch;
+  gap: 10px;
   border: 1px solid rgba(14, 124, 123, 0.24);
   border-radius: var(--radius);
   background:
@@ -3294,20 +3352,72 @@ h3 {
   box-shadow: var(--shadow-soft);
 }
 
+.invoice-summary-bar > div {
+  border: 1px solid rgba(14, 124, 123, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  padding: 8px 10px;
+}
+.invoice-summary-bar > div.is-good { border-color: rgba(37, 112, 72, 0.28); background: rgba(37, 112, 72, 0.07); }
+.invoice-summary-bar > div.is-warn { border-color: rgba(178, 59, 48, 0.26); background: rgba(178, 59, 48, 0.07); }
+.invoice-summary-bar > div.is-info { border-color: rgba(95, 85, 168, 0.26); background: rgba(95, 85, 168, 0.07); }
+.invoice-summary-bar > div.is-danger { border-color: rgba(149, 68, 42, 0.28); background: rgba(149, 68, 42, 0.07); }
+.invoice-summary-bar > div.is-total { border-color: rgba(201, 148, 44, 0.3); background: rgba(201, 148, 44, 0.08); }
+
 .invoice-summary-bar span,
 .invoice-summary-bar small {
   color: var(--accent-dark);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 900;
+}
+
+.invoice-summary-bar small {
+  grid-column: 1 / -1;
+  align-self: center;
+  color: var(--muted);
 }
 
 .invoice-summary-bar strong {
   display: block;
   margin-top: 3px;
   color: var(--ink);
-  font-size: 24px;
+  font-size: 18px;
   font-weight: 900;
 }
+.invoice-summary-bar > div.is-good strong { color: var(--success); }
+.invoice-summary-bar > div.is-warn strong { color: var(--danger); }
+.invoice-summary-bar > div.is-danger strong { color: #95442a; }
+
+.invoice-summary-bar .invoice-method-breakdown {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 4px;
+  border-color: rgba(14, 124, 123, 0.22);
+}
+
+.invoice-summary-bar .invoice-method-breakdown strong {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.invoice-summary-bar .invoice-method-breakdown small {
+  justify-self: start;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  white-space: normal;
+  color: var(--muted);
+}
+
+html[data-theme="dark"] .invoice-summary-bar > div { background: rgba(255, 255, 255, 0.04) !important; border-color: var(--line) !important; }
+html[data-theme="dark"] .invoice-summary-bar > div.is-good { background: rgba(114, 227, 168, 0.12) !important; border-color: rgba(114, 227, 168, 0.30) !important; }
+html[data-theme="dark"] .invoice-summary-bar > div.is-warn { background: rgba(255, 147, 133, 0.12) !important; border-color: rgba(255, 147, 133, 0.30) !important; }
+html[data-theme="dark"] .invoice-summary-bar > div.is-info { background: rgba(170, 166, 255, 0.12) !important; border-color: rgba(170, 166, 255, 0.30) !important; }
+html[data-theme="dark"] .invoice-summary-bar > div.is-danger { background: rgba(255, 169, 121, 0.12) !important; border-color: rgba(255, 169, 121, 0.30) !important; }
+html[data-theme="dark"] .invoice-summary-bar > div.is-total { background: rgba(228, 189, 99, 0.14) !important; border-color: rgba(228, 189, 99, 0.32) !important; }
+html[data-theme="dark"] .invoice-summary-bar .is-good strong { color: #7eecb0 !important; }
+html[data-theme="dark"] .invoice-summary-bar .is-warn strong { color: #ffb6aa !important; }
+html[data-theme="dark"] .invoice-summary-bar .is-danger strong { color: #ffc09b !important; }
 
 .invoice-summary-bar small {
   justify-self: end;
@@ -3530,6 +3640,7 @@ h3 {
 
 .invoice-edit-button,
 .invoice-print-button,
+.invoice-cancel-button,
 .invoice-delete-button {
   border: 1px solid rgba(189, 61, 50, 0.26);
   border-radius: var(--radius);
@@ -3560,6 +3671,18 @@ h3 {
 .invoice-print-button:hover {
   border-color: var(--accent);
   background: var(--accent);
+  color: #fff;
+}
+
+.invoice-cancel-button {
+  border-color: rgba(89, 99, 110, 0.26);
+  background: linear-gradient(180deg, #ffffff, #f1f3f5);
+  color: #59636e;
+}
+
+.invoice-cancel-button:hover {
+  border-color: #59636e;
+  background: #59636e;
   color: #fff;
 }
 
@@ -6827,6 +6950,23 @@ html[data-theme="dark"] .menu-components-summary .menu-operating-cost {
   color: #c8c5ff !important;
 }
 
+/* زر تبديل الدور (مدير/كاشير) — كان فاتحًا في الوضع الليلي */
+html[data-theme="dark"] .role-toggle-button {
+  background: linear-gradient(180deg, #1c3038, #131f26) !important;
+  border-color: var(--line-strong) !important;
+  color: #eef8f7 !important;
+}
+html[data-theme="dark"] .role-toggle-button.is-manager {
+  background: linear-gradient(180deg, rgba(114, 227, 168, 0.15), rgba(16, 40, 28, 0.5)) !important;
+  border-color: rgba(114, 227, 168, 0.34) !important;
+  color: #7eecb0 !important;
+}
+html[data-theme="dark"] .role-toggle-button.is-cashier {
+  background: linear-gradient(180deg, rgba(255, 147, 133, 0.16), rgba(46, 18, 16, 0.5)) !important;
+  border-color: rgba(255, 147, 133, 0.36) !important;
+  color: #ffb6aa !important;
+}
+
 /* ── 13) انتقال ناعم عند تبديل الوضع (يُفعَّل لحظة التبديل فقط) ─ */
 html.theme-switching,
 html.theme-switching *,
@@ -6892,6 +7032,59 @@ html.theme-switching *::after {
 .supplier-debt-row .supplier-owed { color: var(--danger); font-weight: 900; font-size: 15px; background: transparent; }
 .supplier-debt-row .supplier-credit { color: var(--success); font-weight: 900; font-size: 15px; background: transparent; }
 .supplier-pay-form { margin-bottom: 10px; }
+
+/* العروض / الكومبو */
+.combo-manager-panel { margin-top: 14px; }
+.combo-form { display: grid; gap: 10px; margin-bottom: 12px; }
+.combo-add-item-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.combo-add-item-row .field { flex: 1; min-width: 120px; }
+.combo-draft-list { display: grid; gap: 6px; }
+.combo-draft-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface-strong); padding: 8px 12px;
+}
+.combo-draft-row button {
+  border: 1px solid rgba(178, 59, 48, 0.3); background: rgba(178, 59, 48, 0.08);
+  color: var(--danger); border-radius: 8px; padding: 4px 10px; cursor: pointer; font-weight: 800; font-size: 12px;
+}
+.combo-list { display: grid; gap: 8px; margin-top: 12px; }
+.combo-row strong { color: var(--ink); }
+.combo-row small { color: var(--muted); }
+.menu-item.is-combo {
+  border-color: rgba(201, 148, 44, 0.4);
+  background: linear-gradient(180deg, rgba(201, 148, 44, 0.10), var(--surface));
+}
+
+/* تحليلات: ربح كل تصنيف + مقارنة الشهر */
+.category-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.category-row-main { flex: 1; min-width: 120px; }
+.category-row-main > strong { display: block; color: var(--ink); margin-bottom: 6px; }
+.cat-bar { height: 7px; border-radius: 999px; background: rgba(14, 124, 123, 0.16); overflow: hidden; }
+.cat-bar > div { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-dark)); border-radius: 999px; }
+.category-row-figures { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.category-row-figures > span { color: var(--muted); font-size: 12px; }
+.cat-profit { color: var(--success); font-weight: 900; }
+.cat-profit.is-neg { color: var(--danger); }
+.category-row-figures > small { color: var(--muted); font-size: 11px; }
+
+.report-comparison { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.cmp-row {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cmp-label { color: var(--muted); font-size: 12px; }
+.cmp-vals > strong { display: block; font-size: 18px; font-weight: 900; color: var(--ink); }
+.cmp-vals > small { display: block; color: var(--muted); font-size: 11px; }
+.cmp-delta { font-weight: 900; font-size: 13px; align-self: flex-start; }
+.cmp-row.is-up .cmp-delta { color: var(--success); }
+.cmp-row.is-down .cmp-delta { color: var(--danger); }
+@media (max-width: 620px) { .report-comparison { grid-template-columns: 1fr; } }
 
 /* نقاط الولاء */
 .loyalty-card {
@@ -7124,6 +7317,66 @@ html[data-theme="dark"] .supplier-debt-row .supplier-credit { color: #72e3a8 !im
 .option-pick-btn span { font-size: 13px; font-weight: 900; color: var(--accent-dark); }
 .option-pick-btn:hover { transform: translateY(-2px); border-color: var(--accent); box-shadow: var(--shadow-soft); }
 
+.table-merge-box {
+  width: min(520px, 94vw);
+}
+
+.table-merge-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  max-height: min(56vh, 430px);
+  overflow: auto;
+  padding: 2px;
+}
+
+.table-merge-target {
+  display: grid;
+  gap: 5px;
+  min-height: 76px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: linear-gradient(180deg, var(--surface), var(--surface-strong));
+  color: var(--ink);
+  padding: 11px;
+  text-align: start;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.2s ease;
+}
+
+.table-merge-target strong {
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.table-merge-target span,
+.table-merge-target small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.table-merge-target small {
+  font-weight: 800;
+  color: var(--accent-dark);
+}
+
+.table-merge-target.is-empty {
+  border-color: rgba(14, 124, 123, 0.22);
+  background: linear-gradient(180deg, #f5fffd, #ffffff);
+}
+
+.table-merge-target.is-occupied {
+  border-color: rgba(201, 148, 44, 0.45);
+  background: linear-gradient(180deg, #fff8df, #fff2ca);
+}
+
+.table-merge-target:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-soft);
+}
+
 .option-picker-popover {
   position: fixed;
   z-index: 950;
@@ -7173,6 +7426,28 @@ html[data-theme="dark"] .option-picker-popover .option-pick-btn.is-default {
 /* ════════════════════════════════════════════════════════════
    قفل البرنامج برمز PIN
    ════════════════════════════════════════════════════════════ */
+html[data-theme="dark"] .table-merge-button {
+  background: #193040;
+  color: #b8e4ff;
+  border-color: rgba(184, 228, 255, 0.22);
+}
+
+html[data-theme="dark"] .table-merge-target.is-empty {
+  background: linear-gradient(180deg, #152a28, #101b20);
+  border-color: rgba(83, 199, 181, 0.22);
+}
+
+html[data-theme="dark"] .table-merge-target.is-occupied {
+  background: linear-gradient(180deg, #332b15, #201d13);
+  border-color: rgba(231, 176, 64, 0.35);
+}
+
+@media (max-width: 560px) {
+  .table-merge-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .app-lock-overlay {
   position: fixed;
   inset: 0;
@@ -7303,6 +7578,215 @@ html {
   }
 }
 
+/* Fast dark POS polish */
+html[data-theme="dark"] #view-pos {
+  --pos-bg: #090f13;
+  --pos-surface: #111b21;
+  --pos-surface-2: #16242b;
+  --pos-surface-3: #1b2d35;
+  --pos-line: rgba(132, 164, 170, 0.24);
+  --pos-line-strong: rgba(139, 231, 222, 0.36);
+  --pos-ink: #f5fbfa;
+  --pos-muted: #b5c7c8;
+  --pos-accent: #35d3c9;
+  --pos-gold: #f2c96f;
+  --pos-red: #ff9f91;
+}
+
+html[data-theme="dark"] #view-pos .pos-grid {
+  color: var(--pos-ink);
+}
+
+html[data-theme="dark"] #view-pos :where(.tables-panel, .order-panel, .checkout-panel) {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 120px),
+    var(--pos-surface) !important;
+  border-color: var(--pos-line) !important;
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.46),
+    inset 0 1px 0 rgba(255, 255, 255, 0.045) !important;
+}
+
+html[data-theme="dark"] #view-pos .tables-panel {
+  border-color: rgba(53, 211, 201, 0.28) !important;
+}
+
+html[data-theme="dark"] #view-pos .order-panel {
+  border-color: rgba(242, 201, 111, 0.28) !important;
+}
+
+html[data-theme="dark"] #view-pos .checkout-panel {
+  border-color: rgba(114, 227, 168, 0.26) !important;
+}
+
+html[data-theme="dark"] #view-pos :where(.panel-header, .section-title) {
+  border-color: var(--pos-line) !important;
+}
+
+html[data-theme="dark"] #view-pos :where(.order-panel .panel-header, .checkout-panel .panel-header) {
+  background: rgba(255, 255, 255, 0.035) !important;
+}
+
+html[data-theme="dark"] #view-pos :where(h2, h3, strong, label) {
+  color: var(--pos-ink) !important;
+}
+
+html[data-theme="dark"] #view-pos :where(.panel-header p, .field span, .line-title span, .quick-menu-title, .table-button span, .menu-stock, .empty-state) {
+  color: var(--pos-muted) !important;
+}
+
+html[data-theme="dark"] #view-pos :where(input, select, textarea) {
+  background: #071016 !important;
+  color: #ffffff !important;
+  border-color: var(--pos-line) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045) !important;
+}
+
+html[data-theme="dark"] #view-pos :where(input::placeholder, textarea::placeholder) {
+  color: #82979b !important;
+}
+
+html[data-theme="dark"] #view-pos :where(input:focus, select:focus, textarea:focus) {
+  border-color: var(--pos-accent) !important;
+  box-shadow: 0 0 0 3px rgba(53, 211, 201, 0.22) !important;
+}
+
+html[data-theme="dark"] #view-pos :where(.table-button, .menu-item, .quick-menu-button, .order-item, .summary-box, .balance-result, .pos-collapse, .custom-item-form) {
+  background: linear-gradient(180deg, var(--pos-surface-2), #101a20) !important;
+  border-color: var(--pos-line) !important;
+  color: var(--pos-ink) !important;
+  box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+}
+
+html[data-theme="dark"] #view-pos .table-button::before {
+  background: rgba(181, 199, 200, 0.36) !important;
+}
+
+html[data-theme="dark"] #view-pos .table-button strong,
+html[data-theme="dark"] #view-pos .table-button .table-customer {
+  color: #ffffff !important;
+}
+
+html[data-theme="dark"] #view-pos .table-button.is-active {
+  border-color: var(--pos-accent) !important;
+  outline-color: rgba(53, 211, 201, 0.28) !important;
+  background:
+    linear-gradient(180deg, rgba(53, 211, 201, 0.16), rgba(18, 34, 40, 0.98)) !important;
+  box-shadow:
+    inset 0 0 0 2px rgba(53, 211, 201, 0.18),
+    0 12px 28px rgba(0, 0, 0, 0.42) !important;
+}
+
+html[data-theme="dark"] #view-pos .table-button.is-active::before {
+  background: var(--pos-accent) !important;
+}
+
+html[data-theme="dark"] #view-pos .table-button.has-order {
+  background:
+    linear-gradient(180deg, rgba(242, 201, 111, 0.16), rgba(27, 45, 53, 0.96)) !important;
+  border-color: rgba(242, 201, 111, 0.42) !important;
+}
+
+html[data-theme="dark"] #view-pos .table-button.has-order::before {
+  background: var(--pos-gold) !important;
+}
+
+html[data-theme="dark"] #view-pos .table-button.has-debt {
+  background:
+    linear-gradient(180deg, rgba(255, 159, 145, 0.15), rgba(40, 22, 22, 0.9)) !important;
+  border-color: rgba(255, 159, 145, 0.42) !important;
+}
+
+html[data-theme="dark"] #view-pos :where(.category-button, .quick-menu-button, .menu-option-pill, .qty-controls button, .secondary-button, .ghost-button, .icon-button) {
+  background: linear-gradient(180deg, #1a2b33, #111c22) !important;
+  border-color: var(--pos-line) !important;
+  color: var(--pos-ink) !important;
+}
+
+html[data-theme="dark"] #view-pos :where(.category-button.is-active, .primary-button) {
+  background: linear-gradient(160deg, #21c3b9, #087277) !important;
+  border-color: rgba(53, 211, 201, 0.54) !important;
+  color: #ffffff !important;
+  box-shadow: 0 10px 22px rgba(8, 114, 119, 0.28) !important;
+}
+
+html[data-theme="dark"] #view-pos .menu-item {
+  background:
+    linear-gradient(180deg, #17272e, #101a20) !important;
+  border-color: rgba(132, 164, 170, 0.22) !important;
+}
+
+html[data-theme="dark"] #view-pos .menu-item strong {
+  color: #ffffff !important;
+}
+
+html[data-theme="dark"] #view-pos :where(.menu-item span, .quick-menu-button span, .menu-option-pill span, .menu-options-hint) {
+  color: #9df4ec !important;
+}
+
+html[data-theme="dark"] #view-pos .menu-item::after {
+  background: rgba(53, 211, 201, 0.18) !important;
+  color: #bffff8 !important;
+}
+
+html[data-theme="dark"] #view-pos :where(.menu-item:hover, .quick-menu-button:hover, .table-button:hover, .category-button:hover) {
+  border-color: var(--pos-line-strong) !important;
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.44),
+    0 0 0 1px rgba(53, 211, 201, 0.14) !important;
+}
+
+html[data-theme="dark"] #view-pos .menu-item.has-options.is-options-open {
+  background:
+    linear-gradient(180deg, rgba(53, 211, 201, 0.13), #101a20) !important;
+  border-color: rgba(53, 211, 201, 0.52) !important;
+}
+
+html[data-theme="dark"] #view-pos :where(.payment-amount-field, .change-return-field) {
+  background: linear-gradient(180deg, rgba(242, 201, 111, 0.13), rgba(17, 27, 33, 0.96)) !important;
+  border-color: rgba(242, 201, 111, 0.34) !important;
+}
+
+html[data-theme="dark"] #view-pos .payment-amount-field input {
+  background: #060d12 !important;
+  color: #ffffff !important;
+  border-color: rgba(242, 201, 111, 0.42) !important;
+}
+
+html[data-theme="dark"] #view-pos .summary-box strong,
+html[data-theme="dark"] #view-pos .balance-result strong,
+html[data-theme="dark"] #view-pos .payment-amount-field input {
+  color: #ffffff !important;
+  text-shadow: none !important;
+}
+
+html[data-theme="dark"] #view-pos .balance-result.is-paid {
+  background: linear-gradient(180deg, rgba(114, 227, 168, 0.16), rgba(16, 42, 29, 0.68)) !important;
+  border-color: rgba(114, 227, 168, 0.34) !important;
+}
+
+html[data-theme="dark"] #view-pos :where(.balance-result.is-debt, .balance-result.is-credit-warning, .profit-warning) {
+  background: linear-gradient(180deg, rgba(255, 159, 145, 0.16), rgba(45, 20, 18, 0.72)) !important;
+  border-color: rgba(255, 159, 145, 0.38) !important;
+}
+
+html[data-theme="dark"] #view-pos .balance-result.is-credit {
+  background: linear-gradient(180deg, rgba(170, 166, 255, 0.16), rgba(31, 29, 58, 0.72)) !important;
+  border-color: rgba(170, 166, 255, 0.36) !important;
+}
+
+html[data-theme="dark"] #view-pos .open-orders-badge {
+  background: rgba(255, 159, 145, 0.14) !important;
+  border-color: rgba(255, 159, 145, 0.38) !important;
+  color: #ffd5ce !important;
+}
+
+html[data-theme="dark"] #view-pos .open-orders-badge strong {
+  color: #ffffff !important;
+}
+
 @media print {
   body > *:not(.print-host) {
     display: none !important;
@@ -7318,12 +7802,23 @@ html {
   .print-invoice h1 {
     font-size: 18px;
     margin-bottom: 6px;
+    text-align: center;
   }
 
   .print-meta {
+    display: grid;
+    gap: 3px;
     margin: 0 0 12px;
     color: #333;
     font-size: 12px;
+  }
+
+  .print-meta span {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    border-bottom: 1px dotted #ddd;
+    padding-bottom: 2px;
   }
 
   .print-lines p {
@@ -7334,11 +7829,36 @@ html {
   }
 
   .print-lines .pl-amt { white-space: nowrap; font-weight: 700; }
+  .print-lines .pl-name small { display: block; color: #555; font-size: 10px; }
 
   .print-total {
     border-top: 1px dashed #999;
     margin-top: 8px;
     padding-top: 8px;
+  }
+
+  .print-total p {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 4px 0;
+  }
+
+  .print-total strong {
+    white-space: nowrap;
+  }
+
+  .print-cancelled {
+    display: block !important;
+    border: 2px solid #777;
+    padding: 6px;
+    text-align: center;
+    font-weight: 900;
+    color: #333;
+  }
+
+  .is-cancelled-print {
+    opacity: 0.86;
   }
 
   .print-footer {

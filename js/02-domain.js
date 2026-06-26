@@ -411,8 +411,38 @@ function paymentMethodFromPayments(payments = {}) {
   return paymentMethods.find((method) => Number(payments[method] || 0) > 0) || getLastPaymentMethod();
 }
 
+function normalizedPaymentMap(payments = {}) {
+  return {
+    cash: Math.max(Number(payments.cash || 0), 0),
+    bank: Math.max(Number(payments.bank || 0), 0),
+    wallet: Math.max(Number(payments.wallet || 0), 0)
+  };
+}
+
+function invoiceCashboxPayments(invoice = {}) {
+  if (typeof invoiceIsCancelled === "function" && invoiceIsCancelled(invoice)) return { cash: 0, bank: 0, wallet: 0 };
+
+  const payments = normalizedPaymentMap(invoice.payments || {});
+  const byMethod = paymentTotal(payments);
+  const paid = Math.max(Number(invoice.paid ?? invoice.amount ?? 0), 0);
+  const changeReturned = Math.max(Number(invoice.changeReturned || 0), 0);
+  const received = Math.max(Number(invoice.received || 0), 0);
+
+  if (changeReturned > 0.001 && byMethod > paid + 0.001) {
+    const expectedReceived = received > 0.001 ? received : paid + changeReturned;
+    const looksLikeGrossPayment = Math.abs(byMethod - expectedReceived) <= 0.01
+      || Math.abs(byMethod - (paid + changeReturned)) <= 0.01;
+    if (looksLikeGrossPayment) {
+      return paymentsAfterChangeReturned(payments, changeReturned, paymentMethodFromPayments(payments));
+    }
+  }
+
+  if (byMethod <= 0.001 && paid > 0.001) return { cash: paid, bank: 0, wallet: 0 };
+  return payments;
+}
+
 function invoicePaymentText(invoice) {
-  const payments = invoice?.payments || {};
+  const payments = invoiceCashboxPayments(invoice);
   const paidMethods = paymentMethods.filter((method) => Number(payments[method] || 0) > 0);
   const changeReturned = Number(invoice?.changeReturned || 0);
   const changeText = changeReturned > 0 ? ` | راجع ${money(changeReturned)}` : "";
@@ -567,7 +597,7 @@ function openOrdersCount() {
 function invoicePaymentTotals(invoices = []) {
   return paymentMethods.reduce((totals, method) => {
     totals[method] = invoices.reduce((sum, invoice) => {
-      const payments = invoice.payments || {};
+      const payments = invoiceCashboxPayments(invoice);
       return sum + Number(payments[method] || 0);
     }, 0);
     return totals;
@@ -578,7 +608,7 @@ function purchasePaymentTotals(purchases = []) {
   return paymentMethods.reduce((totals, method) => {
     totals[method] = purchases
       .filter((purchase) => purchase.method === method)
-      .reduce((sum, purchase) => sum + purchaseAmount(purchase), 0);
+      .reduce((sum, purchase) => sum + purchasePaidAmount(purchase), 0);
     return totals;
   }, {});
 }
@@ -689,6 +719,15 @@ function workerTransactionPaymentTotals(entries = []) {
   }, {});
 }
 
+function cashEntryPaymentTotals(entries = []) {
+  return paymentMethods.reduce((totals, method) => {
+    totals[method] = entries
+      .filter((entry) => entry.method === method)
+      .reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+    return totals;
+  }, {});
+}
+
 function workerConsumptionTotals(entries = []) {
   return entries.reduce((totals, entry) => {
     const total = Number(entry.total || 0);
@@ -748,12 +787,14 @@ function reportWorkerDueTotal(range) {
 }
 
 function reportData(range) {
-  const invoices = state.invoices.filter((invoice) => dateMatchesRange(invoice, range));
+  const invoices = state.invoices.filter((invoice) => dateMatchesRange(invoice, range) && !invoiceIsCancelled(invoice));
   const saleInvoices = invoices.filter((invoice) => invoice.type === "sale");
   const paymentInvoices = invoices.filter((invoice) => invoice.type === "payment");
   const payoutInvoices = invoices.filter((invoice) => invoice.type === "payout");
   const purchases = state.purchases.filter((purchase) => dateMatchesRange(purchase, range));
+  const supplierPayments = (state.supplierPayments || []).filter((payment) => dateMatchesRange(payment, range));
   const expenses = (state.expenses || []).filter((expense) => dateMatchesRange(expense, range));
+  const ownerWithdrawals = (state.ownerWithdrawals || []).filter((withdrawal) => dateMatchesRange(withdrawal, range));
   const inventoryCounts = (state.inventoryCounts || []).filter((record) => dateMatchesRange(record, range));
   const workerConsumptions = (state.workerConsumptions || []).filter((entry) => dateMatchesRange(entry, range));
   const workerTransactions = activeWorkerTransactions().filter((entry) => dateMatchesRange(entry, range));
@@ -769,7 +810,10 @@ function reportData(range) {
   const debtTotal = saleInvoices.reduce((sum, invoice) => sum + Math.max(Number(invoice.delta || 0), 0), 0);
   const creditTotal = saleInvoices.reduce((sum, invoice) => sum + Math.max(-Number(invoice.delta || 0), 0), 0);
   const purchasesTotal = purchases.reduce((sum, purchase) => sum + purchaseAmount(purchase), 0);
+  const purchasePaidTotal = purchases.reduce((sum, purchase) => sum + purchasePaidAmount(purchase), 0);
+  const supplierPaymentsTotal = supplierPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
   const expensesTotal = expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const ownerWithdrawalsTotal = ownerWithdrawals.reduce((sum, withdrawal) => sum + Number(withdrawal.amount || 0), 0);
   const itemProfit = saleInvoices.reduce((sum, invoice) => sum + invoiceItemProfit(invoice), 0);
   const itemCost = saleInvoices.reduce((sum, invoice) => {
     return sum + (invoice.items || []).reduce((lineSum, item) => {
@@ -783,7 +827,9 @@ function reportData(range) {
     paymentInvoices,
     payoutInvoices,
     purchases,
+    supplierPayments,
     expenses,
+    ownerWithdrawals,
     inventoryCounts,
     customerSummary,
     salesTotal,
@@ -792,7 +838,10 @@ function reportData(range) {
     debtTotal,
     creditTotal,
     purchasesTotal,
+    purchasePaidTotal,
+    supplierPaymentsTotal,
     expensesTotal,
+    ownerWithdrawalsTotal,
     workerConsumptions,
     workerTransactions,
     workerSummary,
@@ -811,7 +860,9 @@ function reportData(range) {
     salePayments: invoicePaymentTotals(saleInvoices),
     paymentPayments: invoicePaymentTotals(paymentInvoices),
     purchasePayments: purchasePaymentTotals(purchases),
+    supplierPaymentPayments: cashEntryPaymentTotals(supplierPayments),
     expensePayments: expensePaymentTotals(expenses),
+    ownerWithdrawalPayments: cashEntryPaymentTotals(ownerWithdrawals),
     workerPayments: workerPaymentTotals(workerConsumptions),
     workerTransactionPayments: workerTransactionPaymentTotals(workerTransactions)
   };
@@ -901,8 +952,9 @@ function cashOnHand() {
 
   // داخل: مقبوض البيع + تسديد ديون
   state.invoices.forEach((inv) => {
+    if (invoiceIsCancelled(inv)) return;
     if (inv.type === "sale" || inv.type === "payment") {
-      const p = inv.payments || {};
+      const p = invoiceCashboxPayments(inv);
       add("cash", "inflow", p.cash);
       add("bank", "inflow", p.bank);
       add("wallet", "inflow", p.wallet);
@@ -916,8 +968,9 @@ function cashOnHand() {
 
   // طالع: دفعات رجعناها لعملاء
   state.invoices.forEach((inv) => {
+    if (invoiceIsCancelled(inv)) return;
     if (inv.type === "payout") {
-      const p = inv.payments || {};
+      const p = invoiceCashboxPayments(inv);
       add("cash", "outflow", p.cash);
       add("bank", "outflow", p.bank);
       add("wallet", "outflow", p.wallet);
@@ -970,7 +1023,8 @@ function todayCashBox() {
 
   state.invoices.forEach((inv) => {
     if (!isToday(inv.createdAt)) return;
-    const p = inv.payments || {};
+    if (invoiceIsCancelled(inv)) return;
+    const p = invoiceCashboxPayments(inv);
     if (inv.type === "sale" || inv.type === "payment") {
       const sourceField = inv.type === "sale" ? "saleIn" : "debtIn";
       add("cash", "in", p.cash); add("cash", sourceField, p.cash);
@@ -1277,6 +1331,7 @@ function statusText(status) {
     credit: "رصيد",
     payment: "دفعة حساب",
     payout: "دفع للعميل",
+    cancelled: "ملغاة",
     temporary: "صنف مؤقت"
   }[status] || status;
 }

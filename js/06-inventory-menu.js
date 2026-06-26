@@ -665,6 +665,103 @@ function renderSettingsMenu() {
       </article>
     `;
   }).join("") : '<div class="empty-state">لا توجد أصناف مطابقة للبحث.</div>';
+  renderCombosSettings();
+}
+
+// ─── إدارة العروض / الكومبو ─────────────────────────────────────
+function renderCombosSettings() {
+  const sel = document.getElementById("comboItemSelect");
+  if (sel) {
+    sel.innerHTML = ['<option value="">اختر صنف</option>']
+      .concat((state.menu || []).map((m) => `<option value="${escapeAttr(m.id)}">${escapeHtml(m.name)} - ${money(m.price)}</option>`))
+      .join("");
+  }
+  renderComboDraft();
+  renderComboList();
+}
+
+function renderComboDraft() {
+  const host = document.getElementById("comboDraftList");
+  if (!host) return;
+  host.innerHTML = comboDraft.length
+    ? comboDraft.map((ci) => {
+      const item = (state.menu || []).find((m) => m.id === ci.menuItemId);
+      return `
+        <article class="combo-draft-row">
+          <span>${escapeHtml(item ? item.name : "صنف محذوف")}${Number(ci.qty) > 1 ? ` ×${ci.qty}` : ""}</span>
+          <button type="button" data-remove-combo-draft="${escapeAttr(ci.menuItemId)}">حذف</button>
+        </article>`;
+    }).join("")
+    : '<div class="empty-state">أضف أصناف للعرض.</div>';
+}
+
+function addComboDraftItem() {
+  const sel = document.getElementById("comboItemSelect");
+  const qtyInput = document.getElementById("comboItemQtyInput");
+  const itemId = sel ? sel.value : "";
+  const qty = Math.max(Math.round(Number(qtyInput ? qtyInput.value : 1)) || 1, 1);
+  if (!itemId) { showToast("اختر صنف للعرض."); return; }
+  const existing = comboDraft.find((ci) => ci.menuItemId === itemId);
+  if (existing) existing.qty += qty;
+  else comboDraft.push({ menuItemId: itemId, qty });
+  if (sel) sel.value = "";
+  if (qtyInput) qtyInput.value = "1";
+  renderComboDraft();
+}
+
+function saveCombo() {
+  const nameInput = document.getElementById("comboNameInput");
+  const priceInput = document.getElementById("comboPriceInput");
+  const name = (nameInput ? nameInput.value : "").trim();
+  const price = Math.max(Number(priceInput ? priceInput.value : 0), 0);
+  if (!name) { showToast("اكتب اسم العرض."); return; }
+  if (price <= 0) { showToast("اكتب سعر العرض."); return; }
+  if (!comboDraft.length) { showToast("أضف صنف واحد على الأقل للعرض."); return; }
+  state.combos = Array.isArray(state.combos) ? state.combos : [];
+  state.combos.push({ id: uid("combo"), name, price, items: comboDraft.map((ci) => ({ menuItemId: ci.menuItemId, qty: ci.qty })) });
+  comboDraft = [];
+  if (nameInput) nameInput.value = "";
+  if (priceInput) priceInput.value = "";
+  if (typeof auditAction === "function") auditAction("combo.create", { name, price });
+  saveState();
+  render();
+  showToast(`تم حفظ العرض "${name}". 🎁`);
+}
+
+async function deleteCombo(comboId) {
+  const combo = (state.combos || []).find((c) => c.id === comboId);
+  if (!combo) return;
+  const confirmed = await appConfirm(`حذف العرض "${combo.name}"؟`);
+  if (!confirmed) return;
+  state.combos = (state.combos || []).filter((c) => c.id !== comboId);
+  if (typeof auditAction === "function") auditAction("combo.delete", { name: combo.name });
+  saveState();
+  render();
+  showToast("تم حذف العرض.");
+}
+
+function renderComboList() {
+  const host = document.getElementById("comboList");
+  if (!host) return;
+  const combos = state.combos || [];
+  host.innerHTML = combos.length
+    ? combos.map((combo) => {
+      const itemsText = (combo.items || []).map((ci) => {
+        const it = (state.menu || []).find((m) => m.id === ci.menuItemId);
+        return it ? `${escapeHtml(it.name)}${Number(ci.qty) > 1 ? ` ×${ci.qty}` : ""}` : "";
+      }).filter(Boolean).join(" + ");
+      return `
+        <article class="settings-row combo-row">
+          <div>
+            <strong>🎁 ${escapeHtml(combo.name)} — ${money(combo.price)}</strong>
+            <small>${itemsText}</small>
+          </div>
+          <div class="settings-row-actions">
+            <button class="settings-delete-button" type="button" data-remove-combo="${escapeAttr(combo.id)}">حذف</button>
+          </div>
+        </article>`;
+    }).join("")
+    : '<div class="empty-state">لا توجد عروض بعد.</div>';
 }
 
 // تحريك صنف لأعلى/أسفل ضمن القائمة المعروضة (يحترم البحث الحالي)

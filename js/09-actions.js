@@ -15,6 +15,8 @@ function recordSettlement(event) {
     showToast("اختر عميل أولاً.");
     return;
   }
+  if (debtMode && !requireManagerPermission("customer.manualDebt", "إضافة دين يدوي")) return;
+  if (payoutMode && !requireManagerPermission("customer.payout", "دفع رصيد للعميل")) return;
   if ((debtMode || payoutMode) && amount <= 0) {
     showToast(debtMode ? "اكتب مبلغ الدين." : payoutMode ? "اكتب مبلغ الدفع للعميل." : "اكتب مبلغ الدفعة.");
     return;
@@ -111,24 +113,60 @@ function printInvoice(invoice) {
   const node = els.printTemplate.content.cloneNode(true);
   const titleEl = node.querySelector("h1");
   if (titleEl) titleEl.textContent = state.businessName || "دفتر المقهى";
-  node.querySelector(".print-meta").textContent = `${invoice.number} | ${formatDate(invoice.createdAt)} | ${invoice.customerName}`;
-  node.querySelector(".print-lines").innerHTML = invoice.items.length
-    ? invoice.items.map((item) => `<p><span class="pl-name">${escapeHtml(item.name)} ×${item.qty}</span><span class="pl-amt">${money(item.qty * item.price)}</span></p>`).join("")
-    : `<p>${escapeHtml(invoice.note || (invoice.type === "sale" ? "دين بدون أصناف" : "دفعة على الحساب"))}: ${money(invoice.type === "sale" ? invoice.total : invoice.paid)}</p>`;
-  const changeReturned = Number(invoice.changeReturned || 0);
-  const received = Number(invoice.received ?? (Number(invoice.paid || 0) + changeReturned));
+
+  const cancelled = typeof invoiceIsCancelled === "function" && invoiceIsCancelled(invoice);
+  const original = cancelled && typeof cancelledInvoiceOriginal === "function" ? cancelledInvoiceOriginal(invoice) : null;
+  const customer = getCustomer(invoice.customerId);
+  const total = Number(original?.total ?? invoice.total ?? 0);
+  const subtotal = Number(original?.subtotal ?? invoice.subtotal ?? total);
+  const discount = Number(original?.discount ?? invoice.discount ?? 0);
+  const paid = Number(original?.paid ?? invoice.paid ?? 0);
+  const changeReturned = Number(original?.changeReturned ?? invoice.changeReturned ?? 0);
+  const received = Number(original?.received ?? invoice.received ?? (paid + changeReturned));
+  const delta = Number(original?.delta ?? invoice.delta ?? (total - paid));
+  const paymentText = cancelled ? "ملغاة" : invoicePaymentText(invoice);
+
+  const metaRows = [
+    ["رقم الفاتورة", invoice.number || "-"],
+    ["التاريخ", formatDate(invoice.createdAt)],
+    ["الطاولة", invoice.tableLabel || "-"],
+    ["العميل", invoice.customerName || "زبون نقدي"],
+    customer?.phone ? ["الجوال", customer.phone] : null,
+    ["الدفع", paymentText]
+  ].filter(Boolean);
+
+  node.querySelector(".print-meta").innerHTML = metaRows
+    .map(([label, value]) => `<span><b>${escapeHtml(label)}:</b> ${escapeHtml(value)}</span>`)
+    .join("");
+
+  node.querySelector(".print-lines").innerHTML = invoice.items?.length
+    ? invoice.items.map((item) => `
+      <p>
+        <span class="pl-name">${escapeHtml(item.name)} <small>×${item.qty} @ ${money(item.price)}</small></span>
+        <span class="pl-amt">${money(Number(item.qty || 0) * Number(item.price || 0))}</span>
+      </p>
+    `).join("")
+    : `<p><span class="pl-name">${escapeHtml(invoice.note || (invoice.type === "debt" ? "دين بدون أصناف" : "حركة حساب"))}</span><span class="pl-amt">${money(total || paid)}</span></p>`;
+
   node.querySelector(".print-total").innerHTML = `
-    <p>الصافي: ${money(invoice.total)}</p>
-    ${changeReturned > 0 ? `<p>المستلم: ${money(received)}</p><p>الراجع للعميل: ${money(changeReturned)}</p>` : ""}
-    <p>المدفوع: ${money(invoice.paid)}</p>
-    <p>الحالة: ${statusText(invoice.status)}</p>
+    ${cancelled ? `<p class="print-cancelled">الفاتورة ملغاة${invoice.cancelledReason ? `: ${escapeHtml(invoice.cancelledReason)}` : ""}</p>` : ""}
+    ${subtotal > 0 && Math.abs(subtotal - total) > 0.001 ? `<p><span>المجموع قبل الخصم</span><strong>${money(subtotal)}</strong></p>` : ""}
+    ${discount > 0 ? `<p><span>الخصم</span><strong>${money(discount)}</strong></p>` : ""}
+    <p><span>${cancelled ? "أصل الصافي" : "الصافي"}</span><strong>${money(total)}</strong></p>
+    ${received > paid && changeReturned > 0 ? `<p><span>المستلم</span><strong>${money(received)}</strong></p><p><span>الراجع للعميل</span><strong>${money(changeReturned)}</strong></p>` : ""}
+    <p><span>${cancelled ? "أصل المدفوع" : "المدفوع"}</span><strong>${money(paid)}</strong></p>
+    ${!cancelled && delta > 0.001 ? `<p><span>المتبقي دين</span><strong>${money(delta)}</strong></p>` : ""}
+    ${!cancelled && delta < -0.001 ? `<p><span>رصيد للعميل</span><strong>${money(Math.abs(delta))}</strong></p>` : ""}
+    <p><span>الحالة</span><strong>${statusText(invoice.status)}</strong></p>
   `;
+
   host.appendChild(node);
   const invoiceWrap = host.querySelector(".print-invoice");
   if (invoiceWrap) {
+    invoiceWrap.classList.toggle("is-cancelled-print", cancelled);
     const footer = document.createElement("p");
     footer.className = "print-footer";
-    footer.textContent = "شكراً لزيارتكم 🌟";
+    footer.textContent = cancelled ? "نسخة توثيقية لفاتورة ملغاة" : "شكراً لزيارتكم";
     invoiceWrap.appendChild(footer);
   }
   document.body.appendChild(host);

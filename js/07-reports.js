@@ -387,7 +387,9 @@ function renderReports() {
   const payoutsPaid = data.payoutInvoices.reduce((sum, invoice) => sum + Number(invoice.paid || 0), 0);
   const workerDrinksPaid = paymentMethods.reduce((sum, method) => sum + Number(data.workerPayments[method] || 0), 0);
   const cashIn = data.paidTotal + paymentsReceived + workerDrinksPaid;
-  const cashOut = data.purchasesTotal + data.expensesTotal + data.workerTransactionSummary.advances + data.workerTransactionSummary.salaryPaid + payoutsPaid;
+  const cashOut = data.purchasePaidTotal + data.supplierPaymentsTotal + data.expensesTotal
+    + data.workerTransactionSummary.advances + data.workerTransactionSummary.salaryPaid
+    + payoutsPaid + data.ownerWithdrawalsTotal;
   const cashNet = cashIn - cashOut;
   const cashInParts = [
     { label: "مقبوض البيع", amount: data.paidTotal },
@@ -395,11 +397,13 @@ function renderReports() {
     { label: "مشروبات عمال", amount: workerDrinksPaid }
   ];
   const cashOutParts = [
-    { label: "مشتريات", amount: data.purchasesTotal },
+    { label: "مشتريات مدفوعة", amount: data.purchasePaidTotal },
+    { label: "تسديد موردين", amount: data.supplierPaymentsTotal },
     { label: "مصروفات عامة", amount: data.expensesTotal },
     { label: "سلف عمال", amount: data.workerTransactionSummary.advances },
     { label: "قبضات عمال مدفوعة", amount: data.workerTransactionSummary.salaryPaid },
-    { label: "دفعات لعملاء", amount: payoutsPaid }
+    { label: "دفعات لعملاء", amount: payoutsPaid },
+    { label: "سحب حصة", amount: data.ownerWithdrawalsTotal }
   ];
 
   const inventoryNet = Number(data.inventorySummary.net || 0);
@@ -413,11 +417,13 @@ function renderReports() {
     .sort((a, b) => b.amount - a.amount);
   const strongestSaleMethod = saleMethodRank[0] || { method: "cash", amount: 0 };
   const outflowRank = [
-    { label: "مشتريات", amount: data.purchasesTotal },
+    { label: "مشتريات مدفوعة", amount: data.purchasePaidTotal },
+    { label: "تسديد موردين", amount: data.supplierPaymentsTotal },
     { label: "مصروفات عامة", amount: data.expensesTotal },
     { label: "سلف عمال", amount: data.workerTransactionSummary.advances },
     { label: "قبضات عمال", amount: data.workerTransactionSummary.salaryPaid },
-    { label: "دفعات لعملاء", amount: payoutsPaid }
+    { label: "دفعات لعملاء", amount: payoutsPaid },
+    { label: "سحب حصة", amount: data.ownerWithdrawalsTotal }
   ].sort((a, b) => Number(b.amount || 0) - Number(a.amount || 0));
   const largestOutflow = outflowRank[0] || { label: "لا يوجد", amount: 0 };
   const topProfitItem = itemRows[0] || null;
@@ -483,11 +489,13 @@ function renderReports() {
       <h4>📉 المصروفات والالتزامات</h4>
       <div class="report-group-grid">
         ${amountCard("مشتريات", data.purchasesTotal, "danger")}
+        ${amountCard("مدفوع للموردين", data.supplierPaymentsTotal, "danger")}
         ${amountCard("مصروفات عامة", data.expensesTotal, "danger")}
         ${amountCard("سلف عمال", data.workerTransactionSummary.advances, "danger")}
         ${amountCard("قبضات عمال مدفوعة", data.workerTransactionSummary.salaryPaid, "danger")}
+        ${amountCard("سحب حصة", data.ownerWithdrawalsTotal, "danger")}
         ${amountCard("مستحق عمال غير مدفوع", data.workerDueTotal, "neutral")}
-        ${Number(data.purchasesTotal || 0) <= 0.001 && Number(data.expensesTotal || 0) <= 0.001 && Number(data.workerTransactionSummary.advances || 0) <= 0.001 && Number(data.workerTransactionSummary.salaryPaid || 0) <= 0.001 && Number(data.workerDueTotal || 0) <= 0.001
+        ${Number(data.purchasesTotal || 0) <= 0.001 && Number(data.supplierPaymentsTotal || 0) <= 0.001 && Number(data.expensesTotal || 0) <= 0.001 && Number(data.workerTransactionSummary.advances || 0) <= 0.001 && Number(data.workerTransactionSummary.salaryPaid || 0) <= 0.001 && Number(data.ownerWithdrawalsTotal || 0) <= 0.001 && Number(data.workerDueTotal || 0) <= 0.001
           ? card("لا توجد مصروفات", "لا يوجد", "neutral")
           : ""}
       </div>
@@ -555,7 +563,9 @@ function renderReports() {
               { label: "تسديد ديون", amount: data.paymentPayments[method] },
               { label: "مشروبات عمال", amount: data.workerPayments[method] },
               { label: "سلف/قبضات مدفوعة", amount: data.workerTransactionPayments[method] },
-              { label: "مصروفات عامة", amount: data.expensePayments[method] }
+              { label: "مصروفات عامة", amount: data.expensePayments[method] },
+              { label: "تسديد موردين", amount: data.supplierPaymentPayments[method] },
+              { label: "سحب حصة", amount: data.ownerWithdrawalPayments[method] }
             ])}</small>
           </div>
           <span>${Number(data.purchasePayments[method] || 0) > 0.001 ? `مشتريات: ${money(data.purchasePayments[method])}` : ""}</span>

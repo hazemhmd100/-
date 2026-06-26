@@ -14,6 +14,10 @@ function markBackupDone() {
 }
 
 function renderBackupReminder() {
+  if (!isManagerMode()) {
+    els.backupReminderBanner.hidden = true;
+    return;
+  }
   const hasData = state.invoices.length || (state.purchases || []).length;
   if (!hasData) { els.backupReminderBanner.hidden = true; return; }
 
@@ -201,8 +205,10 @@ function auditActionLabel(action) {
     "customers.import": "استيراد عملاء",
     "invoices.import": "استيراد فواتير",
     "menu.import": "استيراد أصناف",
+    "invoice.cancel": "إلغاء فاتورة",
     "invoice.edit": "تعديل فاتورة",
     "invoice.delete": "حذف فاتورة",
+    "table.merge": "دمج/نقل طاولة",
     "purchase.create": "إضافة فاتورة مشتريات",
     "purchase.edit": "تعديل فاتورة مشتريات",
     "purchase.delete": "حذف فاتورة مشتريات",
@@ -230,7 +236,7 @@ function printDayReport() {
   const methodRows = paymentMethods.map((method) => `
     <tr>
       <td>${paymentLabels[method]}</td>
-      <td>${money(data.invoicePayments[method] || 0)}</td>
+      <td>${money(Number(data.salePayments[method] || 0) + Number(data.paymentPayments[method] || 0))}</td>
     </tr>
   `).join("");
 
@@ -250,7 +256,10 @@ function printDayReport() {
         <tr><th>ديون جديدة اليوم</th><td>${data.debtTotal > 0.001 ? money(data.debtTotal) : "لا يوجد"}</td></tr>
         <tr><th>الدين الحالي للعملاء</th><td>${data.customerSummary.debt > 0.001 ? money(data.customerSummary.debt) : "لا يوجد"}</td></tr>
         <tr><th>سداد ديون (دفعات عملاء)</th><td>${money(paymentsReceived)}</td></tr>
-        <tr><th>المشتريات</th><td>${money(data.purchasesTotal)}</td></tr>
+        <tr><th>إجمالي المشتريات</th><td>${money(data.purchasesTotal)}</td></tr>
+        <tr><th>المدفوع من الصندوق للمشتريات</th><td>${money(data.purchasePaidTotal)}</td></tr>
+        <tr><th>تسديد موردين من الصندوق</th><td>${money(data.supplierPaymentsTotal)}</td></tr>
+        <tr><th>سحب حصة من الصندوق</th><td>${money(data.ownerWithdrawalsTotal)}</td></tr>
         <tr><th>ربح الأصناف</th><td>${money(data.itemProfit)}</td></tr>
       </table>
       <h1 style="font-size:14px;margin-top:14px;">حسب طريقة الدفع (بيع وتسديد)</h1>
@@ -440,6 +449,103 @@ function renderTopItemsAndPeakHours() {
         <p class="peak-hours-note">إجمالي آخر 14 يوم: ${money(totalRange)} — أعلى يوم: ${money(maxDay)}</p>`
       : '<div class="empty-state">لا توجد مبيعات في آخر 14 يوم.</div>';
   }
+
+  // تحليلات أعمق: ربح كل تصنيف + مقارنة بالشهر الماضي
+  renderCategoryProfit(range);
+  renderMonthComparison();
+}
+
+// ─── تحليلات: ربح كل تصنيف ──────────────────────────────────────
+function lineCategoryName(line) {
+  if (!line || !line.id) return "أصناف مؤقتة";
+  const baseId = String(line.id).split("__")[0];
+  const item = (state.menu || []).find((m) => m.id === baseId);
+  if (item) return item.category || "بدون تصنيف";
+  return line.temporary ? "أصناف مؤقتة" : "أخرى";
+}
+
+function reportCategoryRows(range) {
+  const map = new Map();
+  (state.invoices || []).forEach((invoice) => {
+    if (invoice.type !== "sale" || !invoiceMatchesDateRange(invoice, range)) return;
+    (invoice.items || []).forEach((line) => {
+      const cat = lineCategoryName(line);
+      const net = invoiceLineNet(invoice, line);
+      const cost = Number(line.cost || 0) * Number(line.qty || 0);
+      const entry = map.get(cat) || { category: cat, qty: 0, sales: 0, profit: 0 };
+      entry.qty += Number(line.qty || 0);
+      entry.sales += net;
+      entry.profit += net - cost;
+      map.set(cat, entry);
+    });
+  });
+  return Array.from(map.values()).sort((a, b) => b.profit - a.profit);
+}
+
+function renderCategoryProfit(range) {
+  const host = document.getElementById("reportCategoryList");
+  if (!host) return;
+  const rows = reportCategoryRows(range);
+  const maxProfit = rows.reduce((m, r) => Math.max(m, r.profit), 0) || 1;
+  host.innerHTML = rows.length
+    ? rows.map((r) => `
+      <article class="report-row category-row">
+        <div class="category-row-main">
+          <strong>${escapeHtml(r.category)}</strong>
+          <div class="cat-bar"><div style="width:${Math.max(0, Math.round((r.profit / maxProfit) * 100))}%"></div></div>
+        </div>
+        <div class="category-row-figures">
+          <span>مبيعات ${money(r.sales)}</span>
+          <strong class="cat-profit ${r.profit < 0 ? "is-neg" : ""}">ربح ${money(r.profit)}</strong>
+          <small>${quantityText(r.qty)} مباع</small>
+        </div>
+      </article>`).join("")
+    : '<div class="empty-state">لا توجد مبيعات ضمن الفترة.</div>';
+}
+
+// ─── تحليلات: مقارنة بالشهر الماضي ──────────────────────────────
+function monthRangeFor(offset) {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  const end = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0);
+  const key = (d) => {
+    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 10);
+  };
+  return { minDate: key(start), maxDate: key(end) };
+}
+
+function monthSalesProfit(range) {
+  let sales = 0, profit = 0, count = 0;
+  (state.invoices || []).forEach((invoice) => {
+    if (invoice.type !== "sale" || !invoiceMatchesDateRange(invoice, range)) return;
+    sales += Number(invoice.total || 0);
+    profit += invoiceItemProfit(invoice);
+    count += 1;
+  });
+  return { sales, profit, count };
+}
+
+function renderMonthComparison() {
+  const host = document.getElementById("reportComparison");
+  if (!host) return;
+  const cur = monthSalesProfit(monthRangeFor(0));
+  const prev = monthSalesProfit(monthRangeFor(-1));
+  const row = (label, c, p, isMoney) => {
+    const diff = c - p;
+    const pct = p > 0 ? (diff / p) * 100 : (c > 0 ? 100 : 0);
+    const up = diff >= 0;
+    const fmt = isMoney ? money : (v) => quantityText(v);
+    return `
+      <article class="cmp-row ${up ? "is-up" : "is-down"}">
+        <span class="cmp-label">${label}</span>
+        <div class="cmp-vals"><strong>${fmt(c)}</strong><small>الشهر الماضي ${fmt(p)}</small></div>
+        <span class="cmp-delta">${up ? "▲" : "▼"} ${Math.abs(pct).toFixed(0)}%</span>
+      </article>`;
+  };
+  host.innerHTML = row("المبيعات", cur.sales, prev.sales, true)
+    + row("ربح الأصناف", cur.profit, prev.profit, true)
+    + row("عدد الفواتير", cur.count, prev.count, false);
 }
 
 // ═══ قفل البرنامج برمز PIN ══════════════════════════════════════
@@ -514,6 +620,23 @@ function syncRoleUi() {
     tab.hidden = hidden;
     tab.setAttribute("aria-hidden", hidden ? "true" : "false");
     if (hidden) tab.classList.remove("is-active");
+  });
+
+  document.querySelectorAll("[data-manager-only]").forEach((node) => {
+    const hidden = !isManagerMode();
+    if (hidden) {
+      if (!node.dataset.managerOriginalHidden) node.dataset.managerOriginalHidden = node.hidden ? "true" : "false";
+      node.hidden = true;
+    } else if (node.dataset.managerOriginalHidden) {
+      node.hidden = node.dataset.managerOriginalHidden === "true";
+      delete node.dataset.managerOriginalHidden;
+    }
+    node.setAttribute("aria-hidden", hidden ? "true" : "false");
+  });
+
+  document.querySelectorAll("[data-manager-disabled]").forEach((node) => {
+    node.disabled = !isManagerMode();
+    node.setAttribute("aria-disabled", !isManagerMode() ? "true" : "false");
   });
 
   if (els.mobileMoreButton) {

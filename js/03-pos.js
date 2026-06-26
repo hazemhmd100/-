@@ -2,6 +2,25 @@
 // (مقسوم من app.js — الأسطر 1456-1963)
 
 const FAVORITES_CATEGORY = "⭐ المفضلة";
+const COMBOS_CATEGORY = "🎁 عروض";
+
+function renderComboCards() {
+  const combos = state.combos || [];
+  if (!combos.length) return '<div class="empty-state">لا توجد عروض. أضفها من صفحة الأصناف.</div>';
+  return combos.map((combo) => {
+    const itemsText = (combo.items || []).map((ci) => {
+      const it = (state.menu || []).find((m) => m.id === ci.menuItemId);
+      return it ? `${escapeHtml(it.name)}${Number(ci.qty) > 1 ? ` ×${ci.qty}` : ""}` : "";
+    }).filter(Boolean).join(" + ");
+    return `
+      <article class="menu-item is-combo" role="button" tabindex="0" data-combo-id="${escapeAttr(combo.id)}">
+        <span class="menu-fav-star" aria-hidden="true">🎁</span>
+        <strong>${escapeHtml(combo.name)}</strong>
+        <span>${money(combo.price)}</span>
+        <small class="menu-stock">${itemsText}</small>
+      </article>`;
+  }).join("");
+}
 
 function render() {
   ensurePermittedView();
@@ -621,7 +640,8 @@ function focusMenuSearchSoon(force = false) {
 function renderMenu() {
   if (typeof closeItemOptionPicker === "function") closeItemOptionPicker();
   const hasFavorites = state.menu.some((item) => item.favorite);
-  const categories = [...(hasFavorites ? [FAVORITES_CATEGORY] : []), "الكل", ...new Set(state.menu.map((item) => item.category))];
+  const hasCombos = (state.combos || []).length > 0;
+  const categories = [...(hasCombos ? [COMBOS_CATEGORY] : []), ...(hasFavorites ? [FAVORITES_CATEGORY] : []), "الكل", ...new Set(state.menu.map((item) => item.category))];
   if (!categories.includes(selectedCategory)) selectedCategory = "الكل";
 
   renderQuickMenuItems();
@@ -629,6 +649,11 @@ function renderMenu() {
   els.menuCategories.innerHTML = categories.map((category) => `
     <button class="category-button ${category === selectedCategory ? "is-active" : ""}" type="button" data-category="${escapeAttr(category)}">${escapeHtml(category)}</button>
   `).join("");
+
+  if (selectedCategory === COMBOS_CATEGORY) {
+    els.menuGrid.innerHTML = renderComboCards();
+    return;
+  }
 
   const query = els.menuSearchInput.value.trim().toLowerCase();
   const items = state.menu.filter((item) => {

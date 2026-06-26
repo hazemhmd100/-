@@ -86,6 +86,237 @@ async function deleteSelectedTable() {
   render();
 }
 
+function normalizeOrderPayments(payments = {}) {
+  const next = {};
+  paymentMethods.forEach((method) => {
+    next[method] = Math.max(Number(payments?.[method] || 0), 0);
+  });
+  return next;
+}
+
+function orderHasTableContent(order) {
+  if (!order) return false;
+  const hasItems = Array.isArray(order.items) && order.items.length > 0;
+  const hasPayments = paymentTotal(order.payments || {}) > 0.001;
+  const hasCustomer = Boolean(order.customerId || String(order.customerName || "").trim() || String(order.customerPhone || "").trim());
+  const hasDetails = Number(order.discount || 0) > 0.001
+    || Number(order.changeReturned || 0) > 0.001
+    || String(order.note || "").trim();
+  return hasItems || hasPayments || hasCustomer || hasDetails;
+}
+
+function cloneOrderForTable(order, tableId) {
+  const cloned = JSON.parse(JSON.stringify(order || {}));
+  return {
+    id: cloned.id || uid("order"),
+    tableId,
+    customerId: cloned.customerId || null,
+    customerName: cloned.customerName || "",
+    customerPhone: cloned.customerPhone || "",
+    items: Array.isArray(cloned.items) ? cloned.items : [],
+    discount: Math.max(Number(cloned.discount || 0), 0),
+    paymentMethod: paymentMethods.includes(cloned.paymentMethod) ? cloned.paymentMethod : getLastPaymentMethod(),
+    payments: normalizeOrderPayments(cloned.payments),
+    changeReturned: Math.max(Number(cloned.changeReturned || 0), 0),
+    note: cloned.note || "",
+    createdAt: cloned.createdAt || new Date().toISOString()
+  };
+}
+
+function orderLineMergeKey(line) {
+  return JSON.stringify([
+    line.id || "",
+    line.name || "",
+    Number(line.price || 0),
+    Number(line.cost || 0),
+    Boolean(line.temporary),
+    Boolean(line.isCombo),
+    Boolean(line.isCustomPrice)
+  ]);
+}
+
+function combineOrderNotes(...notes) {
+  return notes
+    .map((note) => String(note || "").trim())
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function mergeOrderLineItems(targetOrder, sourceOrder) {
+  targetOrder.items = Array.isArray(targetOrder.items) ? targetOrder.items : [];
+  (sourceOrder.items || []).forEach((line) => {
+    const copied = JSON.parse(JSON.stringify(line));
+    copied.qty = Math.max(Number(copied.qty || 0), 0);
+    const key = orderLineMergeKey(copied);
+    const existing = targetOrder.items.find((item) => orderLineMergeKey(item) === key);
+    if (existing) {
+      existing.qty = Math.max(Number(existing.qty || 0), 0) + copied.qty;
+      return;
+    }
+    targetOrder.items.push(copied);
+  });
+}
+
+function mergeOrderIntoTarget(targetOrder, sourceOrder, sourceLabel) {
+  const targetHadCustomer = Boolean(targetOrder.customerId || String(targetOrder.customerName || "").trim());
+  const sourceCustomerName = getOrderCustomerName(sourceOrder) || sourceOrder.customerName || "";
+  const hasDifferentCustomer = targetHadCustomer
+    && sourceCustomerName
+    && (sourceOrder.customerId !== targetOrder.customerId || sourceCustomerName !== getOrderCustomerName(targetOrder));
+  const targetHadPaid = paymentTotal(targetOrder.payments || {}) > 0.001;
+
+  mergeOrderLineItems(targetOrder, sourceOrder);
+  targetOrder.discount = Math.max(Number(targetOrder.discount || 0), 0) + Math.max(Number(sourceOrder.discount || 0), 0);
+
+  const targetPayments = normalizeOrderPayments(targetOrder.payments);
+  const sourcePayments = normalizeOrderPayments(sourceOrder.payments);
+  paymentMethods.forEach((method) => {
+    targetPayments[method] += sourcePayments[method];
+  });
+  targetOrder.payments = targetPayments;
+  targetOrder.changeReturned = Math.max(Number(targetOrder.changeReturned || 0), 0)
+    + Math.max(Number(sourceOrder.changeReturned || 0), 0);
+  if (!targetHadPaid && paymentMethods.includes(sourceOrder.paymentMethod)) {
+    targetOrder.paymentMethod = sourceOrder.paymentMethod;
+  }
+
+  if (!targetHadCustomer && (sourceOrder.customerId || sourceCustomerName || sourceOrder.customerPhone)) {
+    targetOrder.customerId = sourceOrder.customerId || null;
+    targetOrder.customerName = sourceOrder.customerName || sourceCustomerName || "";
+    targetOrder.customerPhone = sourceOrder.customerPhone || "";
+  }
+
+  const customerNote = hasDifferentCustomer ? `عميل ${sourceLabel}: ${sourceCustomerName}` : "";
+  targetOrder.note = combineOrderNotes(targetOrder.note, sourceOrder.note, customerNote);
+}
+
+async function mergeSelectedTableInto(targetTableId) {
+  const sourceId = Number(state.selectedTable);
+  const targetId = Math.min(Math.max(Number(targetTableId), 1), getTableCount());
+  if (!Number.isFinite(targetId) || targetId === sourceId) return false;
+
+  const sourceOrder = getExistingOrder(sourceId);
+  if (!orderHasTableContent(sourceOrder)) {
+    showToast("الطاولة الحالية فاضية. أضف طلب أو اختر طاولة عليها طلب.");
+    return false;
+  }
+
+  const sourceLabel = getTableLabel(sourceId);
+  const targetLabel = getTableLabel(targetId);
+  const targetOrder = getExistingOrder(targetId);
+  const targetHasContent = orderHasTableContent(targetOrder);
+  const sourceMath = orderMath(sourceOrder);
+  const targetMath = targetHasContent ? orderMath(targetOrder) : null;
+  const actionLabel = targetHasContent ? "دمج" : "نقل";
+  const confirmText = targetHasContent
+    ? `دمج طلب "${sourceLabel}" مع "${targetLabel}"؟\nسيصبح المجموع ${money(sourceMath.total + targetMath.total)} على "${targetLabel}"، وتصبح "${sourceLabel}" فاضية.`
+    : `نقل طلب "${sourceLabel}" إلى "${targetLabel}"؟\nستصبح "${sourceLabel}" فاضية بعد النقل.`;
+  const confirmed = await appConfirm(confirmText);
+  if (!confirmed) return false;
+
+  const sourceKey = String(sourceId);
+  const targetKey = String(targetId);
+  if (targetHasContent) {
+    const mergedOrder = cloneOrderForTable(targetOrder, targetId);
+    mergeOrderIntoTarget(mergedOrder, sourceOrder, sourceLabel);
+    state.openOrders[targetKey] = mergedOrder;
+  } else {
+    state.openOrders[targetKey] = cloneOrderForTable(sourceOrder, targetId);
+  }
+
+  delete state.openOrders[sourceKey];
+  state.selectedTable = targetId;
+  getOpenOrder(targetId);
+  auditAction("table.merge", {
+    mode: targetHasContent ? "merge" : "move",
+    fromTable: sourceLabel,
+    toTable: targetLabel,
+    sourceTotal: sourceMath.total,
+    targetTotal: targetMath?.total || 0,
+    items: sourceOrder.items?.length || 0
+  });
+  saveState();
+  showToast(targetHasContent
+    ? `تم دمج ${sourceLabel} مع ${targetLabel}.`
+    : `تم نقل طلب ${sourceLabel} إلى ${targetLabel}.`);
+  render();
+  return true;
+}
+
+function closeTableMergePicker() {
+  const overlay = document.getElementById("tableMergeOverlay");
+  if (overlay) overlay.remove();
+  if (closeTableMergePicker.onKeydown) {
+    document.removeEventListener("keydown", closeTableMergePicker.onKeydown);
+    closeTableMergePicker.onKeydown = null;
+  }
+}
+
+function openTableMergePicker() {
+  const tableCount = getTableCount();
+  const sourceId = Number(state.selectedTable);
+  const sourceOrder = getExistingOrder(sourceId);
+  if (tableCount <= 1) {
+    showToast("لا توجد طاولة ثانية للدمج أو النقل.");
+    return;
+  }
+  if (!orderHasTableContent(sourceOrder)) {
+    showToast("الطاولة الحالية فاضية. أضف طلب أو اختر طاولة عليها طلب.");
+    return;
+  }
+
+  closeItemOptionPicker();
+  closeTableMergePicker();
+  const sourceLabel = getTableLabel(sourceId);
+  const overlay = document.createElement("div");
+  overlay.id = "tableMergeOverlay";
+  overlay.className = "option-picker-overlay table-merge-overlay";
+  overlay.innerHTML = `
+    <div class="option-picker-box table-merge-box" role="dialog" aria-modal="true" aria-labelledby="tableMergeTitle">
+      <div class="option-picker-head">
+        <strong id="tableMergeTitle">دمج أو نقل الطاولة</strong>
+        <button class="option-picker-close" type="button" aria-label="إغلاق" data-close-table-merge>×</button>
+      </div>
+      <p>اختر الطاولة الهدف لطلب "${escapeHtml(sourceLabel)}". الطاولة الفاضية تنقل الطلب، والمشغولة تدمج الطلبين.</p>
+      <div class="table-merge-grid">
+        ${Array.from({ length: tableCount }, (_, index) => index + 1)
+          .filter((tableId) => tableId !== sourceId)
+          .map((tableId) => {
+            const order = getExistingOrder(tableId);
+            const hasContent = orderHasTableContent(order);
+            const math = hasContent ? orderMath(order) : null;
+            const customerName = getOrderCustomerName(order);
+            return `
+              <button class="table-merge-target ${hasContent ? "is-occupied" : "is-empty"}" type="button" data-merge-table="${tableId}">
+                <strong>${escapeHtml(getTableLabel(tableId))}</strong>
+                <span>${hasContent ? `${order.items?.length || 0} أصناف | ${money(math.total)}` : "فاضية - نقل مباشر"}</span>
+                ${customerName ? `<small>${escapeHtml(customerName)}</small>` : ""}
+              </button>
+            `;
+          }).join("")}
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  closeTableMergePicker.onKeydown = (event) => {
+    if (event.key === "Escape") closeTableMergePicker();
+  };
+  document.addEventListener("keydown", closeTableMergePicker.onKeydown);
+
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay || event.target.closest("[data-close-table-merge]")) {
+      closeTableMergePicker();
+      return;
+    }
+    const targetButton = event.target.closest("[data-merge-table]");
+    if (!targetButton) return;
+    const targetId = Number(targetButton.dataset.mergeTable);
+    closeTableMergePicker();
+    mergeSelectedTableInto(targetId);
+  });
+}
+
 function closeItemOptionPicker() {
   const picker = typeof document.getElementById === "function"
     ? document.getElementById("optionPickerPopover")
@@ -224,6 +455,40 @@ function openItemOptionPicker(item, anchorEl) {
   document.addEventListener("keydown", onKeydown);
   window.addEventListener("resize", placePicker);
   window.addEventListener("scroll", placePicker, true);
+}
+
+// إضافة عرض/كومبو للطلب: سطر واحد بسعر العرض، تكلفته ومخزونه = مجموع مكوّناته.
+function addComboToOrder(comboId) {
+  const combo = (state.combos || []).find((c) => c.id === comboId);
+  if (!combo) return;
+  const order = getOpenOrder();
+  const lineId = `combo__${combo.id}`;
+  const existing = order.items.find((line) => line.id === lineId);
+  if (existing) {
+    existing.qty += 1;
+    existing.price = Number(combo.price);
+    render();
+    return;
+  }
+  let cost = 0;
+  const stockUsage = [];
+  (combo.items || []).forEach((ci) => {
+    const item = state.menu.find((m) => m.id === ci.menuItemId);
+    if (!item) return;
+    const q = Math.max(Number(ci.qty || 1), 1);
+    cost += menuItemRecipeCost(item) * q;
+    (stockUsageFromMenuItem(item) || []).forEach((u) => stockUsage.push({ ...u, qty: Number(u.qty || 0) * q }));
+  });
+  order.items.push({
+    id: lineId,
+    name: combo.name,
+    price: Number(combo.price),
+    cost,
+    qty: 1,
+    stockUsage,
+    isCombo: true
+  });
+  render();
 }
 
 function addItem(itemId, optionId) {
@@ -442,6 +707,27 @@ function quickPayFillFull() {
   saveState();
 }
 
+async function confirmDebtBeforeClose(customer, math) {
+  if (!customer || Number(math.delta || 0) <= 0.001) return true;
+
+  const currentBalance = Number(customer.balance || 0);
+  const projectedBalance = currentBalance + Number(math.delta || 0);
+  const message = [
+    `سيتم تسجيل دين جديد على ${customer.name}.`,
+    `مبلغ الدين في هذه الفاتورة: ${money(math.delta)}`,
+    `رصيده الحالي: ${balanceText(currentBalance)}`,
+    `رصيده بعد الإغلاق: ${balanceText(projectedBalance)}`,
+    "هل تريد إغلاق الفاتورة وتسجيل الدين؟"
+  ].join("\n");
+
+  return appConfirm(message, {
+    icon: "💳",
+    yesLabel: "تسجيل الدين",
+    cancelLabel: "مراجعة الفاتورة",
+    danger: false
+  });
+}
+
 async function closeInvoice() {
   syncOrderFields();
   const order = getOpenOrder();
@@ -484,6 +770,14 @@ async function closeInvoice() {
   } else if (customer && order.customerPhone) {
     customer.phone = order.customerPhone;
     customer.updatedAt = new Date().toISOString();
+  }
+
+  if (math.delta > 0.001 && customer) {
+    const confirmedDebt = await confirmDebtBeforeClose(customer, math);
+    if (!confirmedDebt) {
+      renderOrderTotals(order);
+      return;
+    }
   }
 
   const status = invoiceStatus(math.delta);

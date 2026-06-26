@@ -344,7 +344,7 @@ function renderCustomers() {
           ${customer.balance > 0.01 ? `<button class="customer-wa-button" type="button" data-whatsapp-customer="${customer.id}">📲 تذكير</button>` : ""}
           ${customer.balance > 0.01 ? `<button class="customer-settle-button" type="button" data-settle-customer="${customer.id}">💵 تسديد</button>` : ""}
           <button class="customer-edit-button" type="button" data-edit-customer="${customer.id}">تعديل</button>
-          <button class="customer-delete-button" type="button" data-remove-customer="${customer.id}">حذف</button>
+          ${canUsePermission("customer.delete") ? `<button class="customer-delete-button" type="button" data-remove-customer="${customer.id}">حذف</button>` : ""}
         </div>
       </div>
     </article>
@@ -352,15 +352,19 @@ function renderCustomers() {
 }
 
 function renderLedgerItems(invoice) {
+  const cancellationNote = invoiceIsCancelled(invoice)
+    ? `<p class="ledger-note invoice-cancel-note">ملغاة${invoice.cancelledReason ? `: ${escapeHtml(invoice.cancelledReason)}` : ""}</p>`
+    : "";
   if (invoice.type === "payment" || invoice.type === "payout") {
     const discount = invoice.type === "payment" ? Number(invoice.discount || 0) : 0;
     const note = invoice.note ? escapeHtml(invoice.note) : "";
     const discountLine = discount > 0 ? `<br><small>خصم عند التسديد: ${money(discount)}</small>` : "";
-    return note || discountLine ? `<p class="ledger-note">${note}${discountLine}</p>` : "";
+    const movementNote = note || discountLine ? `<p class="ledger-note">${note}${discountLine}</p>` : "";
+    return `${cancellationNote}${movementNote}`;
   }
 
   if (!invoice.items?.length) {
-    return `<p class="ledger-note">${escapeHtml(invoice.note || "دين بدون أصناف")}</p>`;
+    return `${cancellationNote}<p class="ledger-note">${escapeHtml(invoice.note || "دين بدون أصناف")}</p>`;
   }
 
   const changeLine = Number(invoice.changeReturned || 0) > 0
@@ -376,11 +380,166 @@ function renderLedgerItems(invoice) {
       `).join("")}
     </div>
     ${changeLine}
+    ${cancellationNote}
   `;
 }
 
 function hasTemporaryItems(invoice) {
   return invoice.type === "sale" && (invoice.items || []).some((item) => item.temporary);
+}
+
+function invoiceDebtDelta(invoice) {
+  const delta = Number(invoice.delta);
+  if (Number.isFinite(delta)) return delta;
+  return Number(invoice.total || 0) - Number(invoice.paid || 0);
+}
+
+function invoiceFinancialType(invoice) {
+  if (invoiceIsCancelled(invoice)) return "cancelled";
+  if (invoice.type === "payment") return "payment";
+  if (invoice.type === "payout") return "payout";
+  if (invoice.type === "debt") return "manual-debt";
+  if (invoice.type !== "sale") return invoice.type || "other";
+  const delta = invoiceDebtDelta(invoice);
+  if (delta > 0.001) return "sale-debt";
+  if (delta < -0.001) return "sale-credit";
+  return "sale-paid";
+}
+
+function invoicePaymentAmountByMethod(invoice, method) {
+  const payments = typeof invoiceCashboxPayments === "function" ? invoiceCashboxPayments(invoice) : invoice.payments || {};
+  const exact = Number(payments[method] || 0);
+  if (exact > 0.001 || method !== "cash") return Math.max(exact, 0);
+  const paid = Number(invoice.paid || 0);
+  return paymentTotal(payments) <= 0.001 && paid > 0.001 ? paid : 0;
+}
+
+function buildInvoiceFinancialSummary(rows = []) {
+  const summary = {
+    salesTotal: 0,
+    paidNoDebt: 0,
+    salePaidAtSale: 0,
+    saleDebt: 0,
+    debtSettled: 0,
+    manualDebt: 0,
+    debtDiscount: 0,
+    customerCredit: 0,
+    payout: 0,
+    collected: 0,
+    netCollected: 0,
+    incomingByMethod: { cash: 0, bank: 0, wallet: 0 },
+    payoutByMethod: { cash: 0, bank: 0, wallet: 0 },
+    counts: {
+      salePaid: 0,
+      saleDebt: 0,
+      payment: 0,
+      manualDebt: 0,
+      saleCredit: 0,
+      payout: 0,
+      temporary: 0,
+      cancelled: 0
+    }
+  };
+
+  rows.forEach((invoice) => {
+    if (invoiceIsCancelled(invoice)) {
+      summary.counts.cancelled += 1;
+      return;
+    }
+    const type = invoiceFinancialType(invoice);
+    const paid = Number(invoice.paid || 0);
+    const total = Number(invoice.total || 0);
+    const delta = invoiceDebtDelta(invoice);
+
+    if (type === "temporary") summary.counts.temporary += 1;
+
+    if (invoice.type === "sale") {
+      summary.salesTotal += total;
+      summary.salePaidAtSale += paid;
+      paymentMethods.forEach((method) => {
+        summary.incomingByMethod[method] += invoicePaymentAmountByMethod(invoice, method);
+      });
+      if (type === "sale-debt") {
+        summary.saleDebt += Math.max(delta, 0);
+        summary.counts.saleDebt += 1;
+      } else if (type === "sale-credit") {
+        summary.customerCredit += Math.abs(Math.min(delta, 0));
+        summary.counts.saleCredit += 1;
+      } else {
+        summary.paidNoDebt += total;
+        summary.counts.salePaid += 1;
+      }
+      return;
+    }
+
+    if (invoice.type === "payment") {
+      summary.debtSettled += paid;
+      summary.debtDiscount += Number(invoice.discount || 0);
+      summary.counts.payment += 1;
+      paymentMethods.forEach((method) => {
+        summary.incomingByMethod[method] += invoicePaymentAmountByMethod(invoice, method);
+      });
+      return;
+    }
+
+    if (invoice.type === "debt") {
+      summary.manualDebt += Math.max(total - paid, 0);
+      summary.counts.manualDebt += 1;
+      return;
+    }
+
+    if (invoice.type === "payout") {
+      summary.payout += paid;
+      summary.customerCredit += paid;
+      summary.counts.payout += 1;
+      paymentMethods.forEach((method) => {
+        summary.payoutByMethod[method] += invoicePaymentAmountByMethod(invoice, method);
+      });
+    }
+  });
+
+  summary.collected = summary.salePaidAtSale + summary.debtSettled;
+  summary.netCollected = summary.collected - summary.payout;
+  return summary;
+}
+
+function renderInvoiceFinancialSummary(rows, displayedCount, totalMatchCount, cashier) {
+  const summary = buildInvoiceFinancialSummary(rows);
+  const setStat = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = money(value);
+  };
+
+  els.invoiceNetTotal.textContent = money(summary.salesTotal);
+  els.invoicePaidTotal.textContent = money(summary.netCollected);
+  setStat("invoiceStatPaidNoDebt", summary.paidNoDebt);
+  setStat("invoiceStatSalePaidAtSale", summary.salePaidAtSale);
+  setStat("invoiceStatDebt", summary.saleDebt);
+  setStat("invoiceStatSettled", summary.debtSettled);
+  setStat("invoiceStatManualDebt", summary.manualDebt);
+  setStat("invoiceStatDebtDiscount", summary.debtDiscount);
+  setStat("invoiceStatCustomerCredit", summary.customerCredit);
+
+  if (els.invoicePaymentBreakdown) {
+    els.invoicePaymentBreakdown.innerHTML = `
+      <span>طرق الدفع للمقبوض</span>
+      <strong>${paymentMethods.map((method) => `${paymentLabels[method]} ${money(summary.incomingByMethod[method] || 0)}`).join(" | ")}</strong>
+      ${summary.payout > 0.001 ? `<small>خارج للعميل: ${paymentMethods.map((method) => `${paymentLabels[method]} ${money(summary.payoutByMethod[method] || 0)}`).join(" | ")}</small>` : ""}
+    `;
+  }
+
+  const countText = cashier
+    ? `آخر ${displayedCount} من ${totalMatchCount} حركة مطابقة`
+    : `${totalMatchCount} حركة مطابقة`;
+  const detailText = [
+    `بيع مباشر ${summary.counts.salePaid}`,
+    `بيع بدين ${summary.counts.saleDebt}`,
+    `تسديد ${summary.counts.payment}`,
+    `دين يدوي ${summary.counts.manualDebt}`,
+    `رصيد/دفع ${summary.counts.saleCredit + summary.counts.payout}`,
+    `ملغاة ${summary.counts.cancelled}`
+  ].join(" | ");
+  els.invoiceNetCount.textContent = `${countText} - ${detailText}`;
 }
 
 function selectedInvoiceFilters() {
@@ -389,6 +548,7 @@ function selectedInvoiceFilters() {
   return {
     query: els.invoiceSearchInput.value.trim().toLowerCase(),
     status: els.invoiceStatusFilter.value,
+    type: els.invoiceTypeFilter?.value || "all",
     minDate: dateFrom && dateTo && dateFrom > dateTo ? dateTo : dateFrom,
     maxDate: dateFrom && dateTo && dateFrom > dateTo ? dateFrom : dateTo,
     dateSort: els.invoiceDateSortInput.value
@@ -421,9 +581,12 @@ function invoiceMatchesFilters(invoice, filters) {
   const haystack = `${invoice.number} ${invoice.customerName} ${invoice.tableLabel} ${itemText} ${paymentText} ${invoice.note || ""}`.toLowerCase();
   const matchesQuery = searchMatch(haystack, filters.query);
   const matchesStatus = filters.status === "all" || (filters.status === "temporary" ? hasTemporary : invoice.status === filters.status);
+  const matchesType = !filters.type
+    || filters.type === "all"
+    || (filters.type === "temporary" ? hasTemporary : filters.type === invoiceFinancialType(invoice));
   const matchesDateFrom = !filters.minDate || invoiceDate >= filters.minDate;
   const matchesDateTo = !filters.maxDate || invoiceDate <= filters.maxDate;
-  return matchesQuery && matchesStatus && matchesDateFrom && matchesDateTo;
+  return matchesQuery && matchesStatus && matchesType && matchesDateFrom && matchesDateTo;
 }
 
 function filteredInvoicesForView() {
@@ -583,39 +746,53 @@ function renderCustomerDetail() {
             <strong>${invoice.type === "payment" ? "دفعة على الحساب" : invoice.type === "payout" ? "دفع للعميل" : invoice.type === "debt" ? "دين مضاف يدوياً" : invoice.type === "reward" ? "🎁 مكافأة ولاء" : `فاتورة ${invoice.number}`}</strong>
             <p>${formatDate(invoice.createdAt)} | ${statusText(invoice.status)}</p>
           </div>
-          <span class="balance-badge ${invoice.status === "debt" ? "debt" : invoice.status === "credit" || invoice.status === "payout" ? "credit" : "clear"}">
+          <span class="balance-badge ${invoice.status === "cancelled" ? "cancelled" : invoice.status === "debt" ? "debt" : invoice.status === "credit" || invoice.status === "payout" ? "credit" : "clear"}">
             ${invoice.type === "payment" ? `${money(invoice.paid)}${Number(invoice.discount || 0) > 0 ? ` + خصم ${money(invoice.discount)}` : ""}` : invoice.type === "payout" ? `له ${money(invoice.paid)}` : `${money(invoice.total)} / ${money(invoice.paid)}`}
           </span>
         </header>
         ${renderLedgerItems(invoice)}
-        <div class="invoice-actions-cell customer-ledger-actions">
-          <button class="invoice-edit-button" type="button" data-edit-customer-ledger="${invoice.id}">تعديل</button>
-          <button class="invoice-delete-button" type="button" data-delete-customer-ledger="${invoice.id}">حذف</button>
-        </div>
+        ${canUsePermission("invoice.edit") || canUsePermission("invoice.cancel") || canUsePermission("invoice.delete") ? `
+          <div class="invoice-actions-cell customer-ledger-actions">
+            ${canUsePermission("invoice.edit") && invoiceCanBeCancelled(invoice) ? `<button class="invoice-edit-button" type="button" data-edit-customer-ledger="${invoice.id}">تعديل</button>` : ""}
+            ${canUsePermission("invoice.cancel") && invoiceCanBeCancelled(invoice) ? `<button class="invoice-cancel-button" type="button" data-cancel-customer-ledger="${invoice.id}">إلغاء</button>` : ""}
+            ${canUsePermission("invoice.delete") ? `<button class="invoice-delete-button" type="button" data-delete-customer-ledger="${invoice.id}">حذف</button>` : ""}
+          </div>
+        ` : ""}
       </article>
     `).join("")
     : '<div class="empty-state">لا توجد حركات لهذا العميل.</div>';
   renderCustomerPrices();
 }
 
+const CASHIER_INVOICE_LIMIT = 10;
+
 function renderInvoices() {
-  const allRows = filteredInvoicesForView();
-  const netTotal = allRows.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
-  const paidTotal = allRows.reduce((sum, invoice) => sum + Number(invoice.paid || 0), 0);
+  const cashier = !isManagerMode();
+  const filteredRows = filteredInvoicesForView();
+  let allRows = filteredRows;
+  // الكاشير يشوف آخر 10 فواتير فقط (الأحدث)
+  if (cashier) {
+    allRows = allRows.slice()
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+      .slice(0, CASHIER_INVOICE_LIMIT);
+  }
+  renderInvoiceFinancialSummary(allRows, allRows.length, filteredRows.length, cashier);
 
-  els.invoiceNetTotal.textContent = money(netTotal);
-  els.invoicePaidTotal.textContent = money(paidTotal);
-  els.invoiceNetCount.textContent = `${allRows.length} ${allRows.length === 1 ? "فاتورة" : "فواتير"}`;
-
-  // عرض جزء فقط لتفادي تجميد الجدول مع آلاف الفواتير
-  if (invoiceViewLimit < INVOICE_VIEW_STEP) invoiceViewLimit = INVOICE_VIEW_STEP;
-  const rows = allRows.slice(0, invoiceViewLimit);
-  const remaining = allRows.length - rows.length;
-  const moreRow = remaining > 0
-    ? `<tr class="invoice-more-row"><td colspan="11">
-         <button class="secondary-button" type="button" data-show-more-invoices>⬇ عرض ${Math.min(remaining, INVOICE_VIEW_STEP)} فاتورة أكثر (متبقّي ${remaining})</button>
-       </td></tr>`
-    : "";
+  // عرض جزء فقط لتفادي تجميد الجدول مع آلاف الفواتير (المدير فقط؛ الكاشير محدود بـ10)
+  let rows;
+  let moreRow = "";
+  if (cashier) {
+    rows = allRows;
+  } else {
+    if (invoiceViewLimit < INVOICE_VIEW_STEP) invoiceViewLimit = INVOICE_VIEW_STEP;
+    rows = allRows.slice(0, invoiceViewLimit);
+    const remaining = allRows.length - rows.length;
+    moreRow = remaining > 0
+      ? `<tr class="invoice-more-row"><td colspan="11">
+           <button class="secondary-button" type="button" data-show-more-invoices>⬇ عرض ${Math.min(remaining, INVOICE_VIEW_STEP)} فاتورة أكثر (متبقّي ${remaining})</button>
+         </td></tr>`
+      : "";
+  }
 
   els.invoiceTableBody.innerHTML = rows.length
     ? rows.map((invoice) => `
@@ -625,21 +802,22 @@ function renderInvoices() {
         <td>${escapeHtml(invoice.customerName || "زبون نقدي")}</td>
         <td>${escapeHtml(invoice.tableLabel || "-")}</td>
         <td class="invoice-items-cell">${renderLedgerItems(invoice)}</td>
-        <td>${money(invoice.total)}</td>
+        <td>${invoiceTotalDisplay(invoice)}</td>
         <td>${invoicePaidDisplay(invoice)}</td>
         <td><span class="invoice-payment-method">${escapeHtml(invoicePaymentText(invoice))}</span></td>
         <td class="invoice-note-cell">${invoice.note ? escapeHtml(invoice.note) : "-"}</td>
         <td>
           <div class="invoice-status-cell">
-            <span class="balance-badge ${invoice.status === "debt" ? "debt" : invoice.status === "credit" || invoice.status === "payout" ? "credit" : "clear"}">${statusText(invoice.status)}</span>
+            <span class="balance-badge ${invoice.status === "cancelled" ? "cancelled" : invoice.status === "debt" ? "debt" : invoice.status === "credit" || invoice.status === "payout" ? "credit" : "clear"}">${statusText(invoice.status)}</span>
             ${hasTemporaryItems(invoice) ? '<span class="temporary-status-badge">صنف مؤقت</span>' : ""}
           </div>
         </td>
         <td>
           <div class="invoice-actions-cell">
-            <button class="invoice-edit-button" type="button" data-edit-invoice="${invoice.id}">تعديل</button>
+            ${canUsePermission("invoice.edit") && invoiceCanBeCancelled(invoice) ? `<button class="invoice-edit-button" type="button" data-edit-invoice="${invoice.id}">تعديل</button>` : ""}
             <button class="invoice-print-button" type="button" data-print-invoice="${invoice.id}">طباعة</button>
-            <button class="invoice-delete-button" type="button" data-delete-invoice="${invoice.id}">حذف</button>
+            ${canUsePermission("invoice.cancel") && invoiceCanBeCancelled(invoice) ? `<button class="invoice-cancel-button" type="button" data-cancel-invoice="${invoice.id}">إلغاء</button>` : ""}
+            ${canUsePermission("invoice.delete") ? `<button class="invoice-delete-button" type="button" data-delete-invoice="${invoice.id}">حذف</button>` : ""}
           </div>
         </td>
       </tr>
@@ -648,10 +826,22 @@ function renderInvoices() {
 }
 
 function invoicePaidDisplay(invoice) {
+  if (invoiceIsCancelled(invoice)) {
+    const original = cancelledInvoiceOriginal(invoice);
+    const originalPaid = Number(original?.paid || 0);
+    return `${money(0)}${originalPaid > 0 ? `<br><small>قبل الإلغاء ${money(originalPaid)}</small>` : ""}`;
+  }
   const changeReturned = Number(invoice.changeReturned || 0);
   if (changeReturned <= 0) return money(invoice.paid);
   const received = Number(invoice.received ?? (Number(invoice.paid || 0) + changeReturned));
   return `${money(invoice.paid)}<br><small>استلم ${money(received)} | راجع ${money(changeReturned)}</small>`;
+}
+
+function invoiceTotalDisplay(invoice) {
+  if (!invoiceIsCancelled(invoice)) return money(invoice.total);
+  const original = cancelledInvoiceOriginal(invoice);
+  const originalTotal = Number(original?.total || 0);
+  return `${money(0)}${originalTotal > 0 ? `<br><small>قبل الإلغاء ${money(originalTotal)}</small>` : ""}`;
 }
 
 function invoiceAuditSummary(invoice = {}) {
@@ -668,7 +858,16 @@ function invoiceAuditSummary(invoice = {}) {
   };
 }
 
+function cancelledInvoiceOriginal(invoice = {}) {
+  return invoice.cancelledOriginal || invoice.cancelled?.original || null;
+}
+
+function invoiceCanBeCancelled(invoice) {
+  return invoice && !invoiceIsCancelled(invoice);
+}
+
 function reverseInvoiceFromCustomer(invoice) {
+  if (invoiceIsCancelled(invoice)) return;
   if (!invoice.customerId) return;
   const customer = getCustomer(invoice.customerId);
   if (!customer) return;
@@ -684,6 +883,7 @@ function reverseInvoiceFromCustomer(invoice) {
 }
 
 function reverseInvoiceStock(invoice) {
+  if (invoiceIsCancelled(invoice)) return;
   if (invoice.type !== "sale") return;
   restoreStockForSoldItems(invoice.items);
 }
@@ -958,6 +1158,10 @@ function removeInvoiceEditItem(index) {
 function startEditInvoice(invoiceId) {
   const invoice = state.invoices.find((item) => item.id === invoiceId);
   if (!invoice) return;
+  if (invoiceIsCancelled(invoice)) {
+    showToast("لا يمكن تعديل فاتورة ملغاة.");
+    return;
+  }
   if (!guardClosedPeriod(invoice.createdAt, "تعديل الفاتورة")) return;
 
   editingInvoiceId = invoice.id;
@@ -1074,6 +1278,68 @@ function saveEditedInvoice(event) {
   if (lastClosedInvoice?.id === invoice.id) lastClosedInvoice = invoice;
   cancelInvoiceEdit();
   showToast("تم حفظ تعديل الفاتورة.");
+  render();
+}
+
+async function cancelInvoice(invoiceId) {
+  const invoice = state.invoices.find((item) => item.id === invoiceId);
+  if (!invoice) return;
+  if (invoiceIsCancelled(invoice)) {
+    showToast("الفاتورة ملغاة مسبقاً.");
+    return;
+  }
+  if (typeof guardClosedPeriod === "function" && !guardClosedPeriod(invoice.createdAt, "إلغاء الفاتورة")) return;
+
+  let reason = "";
+  if (typeof window !== "undefined" && typeof window.prompt === "function") {
+    const raw = window.prompt(`سبب إلغاء الفاتورة ${invoice.number}:`, "");
+    if (raw === null) return;
+    reason = String(raw || "").trim();
+  }
+  if (!reason) reason = "بدون سبب";
+
+  const confirmed = await appConfirm(
+    `إلغاء الفاتورة ${invoice.number}؟\nسيتم عكس أثرها من حساب العميل والمخزون، وستبقى ظاهرة في السجل كفاتورة ملغاة.`,
+    { icon: "↩", yesLabel: "إلغاء الفاتورة", cancelLabel: "رجوع" }
+  );
+  if (!confirmed) return;
+
+  const before = cloneInvoice(invoice);
+  reverseInvoiceFromCustomer(before);
+  reverseInvoiceStock(before);
+
+  invoice.cancelledAt = new Date().toISOString();
+  invoice.cancelledReason = reason;
+  invoice.cancelledOriginal = {
+    ...invoiceAuditSummary(before),
+    subtotal: Number(before.subtotal || 0),
+    discount: Number(before.discount || 0),
+    received: Number(before.received ?? (Number(before.paid || 0) + Number(before.changeReturned || 0))),
+    changeReturned: Number(before.changeReturned || 0),
+    payments: { ...(before.payments || {}) },
+    itemCount: (before.items || []).length
+  };
+  invoice.originalType = before.type || invoice.originalType || "";
+  invoice.originalStatus = before.status || invoice.originalStatus || "";
+  invoice.type = "cancelled";
+  invoice.status = "cancelled";
+  invoice.subtotal = 0;
+  invoice.discount = 0;
+  invoice.total = 0;
+  invoice.paid = 0;
+  invoice.received = 0;
+  invoice.changeReturned = 0;
+  invoice.delta = 0;
+  invoice.payments = { cash: 0, bank: 0, wallet: 0 };
+  invoice.note = `ملغاة: ${reason}`;
+
+  rebuildCustomerAccountsFromInvoices(state);
+  auditAction("invoice.cancel", {
+    invoice: invoiceAuditSummary(before),
+    reason
+  });
+  if (lastClosedInvoice?.id === invoice.id) lastClosedInvoice = invoice;
+  showToast(`تم إلغاء الفاتورة ${invoice.number}.`);
   render();
 }
 

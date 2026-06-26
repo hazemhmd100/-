@@ -53,6 +53,7 @@ const context = {
   Promise,
   clearTimeout() {},
   setTimeout() { return 0; },
+  prompt() { return "test reason"; },
   print() {},
   localStorage: {
     getItem() { return null; },
@@ -91,6 +92,7 @@ for (const file of files) {
 }
 
 const scenario = `
+(async () => {
 render = function () {};
 renderMenu = function () {};
 renderOrderTotals = function () {};
@@ -103,6 +105,11 @@ renderActiveView = function () {};
 renderBackupReminder = function () {};
 applyBusinessName = function () {};
 applyAppTheme = function () {};
+const confirmMessages = [];
+appConfirm = async function (message) {
+  confirmMessages.push(message);
+  return true;
+};
 
 state = defaultState();
 state.menu = normalizeMenuItems([
@@ -123,9 +130,16 @@ state.auditLog = [];
 
 currentUserRole = "cashier";
 assert.strictEqual(canAccessView("pos"), true);
+assert.strictEqual(canAccessView("invoices"), true);
+assert.strictEqual(canAccessView("customers"), true);
 assert.strictEqual(canAccessView("reports"), false);
+assert.strictEqual(canUsePermission("invoice.edit"), false);
+assert.strictEqual(canUsePermission("invoice.cancel"), false);
+assert.strictEqual(canUsePermission("customer.price"), false);
 currentUserRole = "manager";
 assert.strictEqual(canAccessView("reports"), true);
+assert.strictEqual(canUsePermission("invoice.edit"), true);
+assert.strictEqual(canUsePermission("invoice.cancel"), true);
 
 state.invoices = [{
   id: "history",
@@ -149,6 +163,38 @@ function resetCheckoutFields() {
 
 resetCheckoutFields();
 
+state.selectedTable = 1;
+addItem("tea");
+let mergeSource = getOpenOrder();
+mergeSource.payments = { cash: 2, bank: 0, wallet: 0 };
+mergeSource.note = "source note";
+state.openOrders["2"] = {
+  id: "target-order",
+  tableId: 2,
+  customerId: null,
+  customerName: "",
+  customerPhone: "",
+  items: [{ id: "coffee", name: "ظ‚ظ‡ظˆط©", qty: 1, price: 8, cost: 2 }],
+  discount: 1,
+  paymentMethod: "bank",
+  payments: { cash: 0, bank: 5, wallet: 0 },
+  changeReturned: 0,
+  note: "target note",
+  createdAt: new Date().toISOString()
+};
+assert.strictEqual(await mergeSelectedTableInto(2), true);
+assert.strictEqual(state.selectedTable, 2);
+assert.strictEqual(state.openOrders["1"], undefined);
+assert.strictEqual(state.openOrders["2"].items.length, 2);
+assert.strictEqual(paymentTotal(state.openOrders["2"].payments), 7);
+assert(state.openOrders["2"].note.includes("source note"));
+assert.strictEqual(state.auditLog[0].action, "table.merge");
+confirmMessages.length = 0;
+state.openOrders = {};
+state.selectedTable = 1;
+state.auditLog = [];
+resetCheckoutFields();
+
 addMenuItemFromGrid("coffee", "large");
 let order = getOpenOrder();
 assert.strictEqual(order.items.length, 1);
@@ -159,17 +205,20 @@ assert.strictEqual(order.items.length, 1);
 assert.strictEqual(order.items[0].qty, 2);
 
 els.paymentAmountInput.value = "24";
-closeInvoice();
+await closeInvoice();
 assert.strictEqual(state.invoices.length, 1);
 assert.strictEqual(state.invoices[0].status, "paid");
 assert.strictEqual(state.invoices[0].paid, 24);
+assert.strictEqual(confirmMessages.length, 0);
 
 resetCheckoutFields();
 addItem("tea");
 els.customerNameInput.value = "أبو أحمد";
-closeInvoice();
+await closeInvoice();
 assert.strictEqual(state.invoices.length, 2);
 assert.strictEqual(state.invoices[0].status, "debt");
+assert.strictEqual(confirmMessages.length, 1);
+assert(confirmMessages[0].includes("مبلغ الدين"));
 const customer = state.customers.find((item) => item.name === "أبو أحمد");
 assert(customer);
 assert.strictEqual(customer.balance, 6);
@@ -187,6 +236,99 @@ recordSettlement({ preventDefault() {} });
 assert.strictEqual(state.invoices.length, 3);
 assert.strictEqual(state.invoices[0].type, "payment");
 assert.strictEqual(customer.balance, 1);
+assert.strictEqual(invoiceFinancialType(state.invoices[0]), "payment");
+assert.strictEqual(invoiceFinancialType(state.invoices[1]), "sale-debt");
+assert.strictEqual(invoiceFinancialType(state.invoices[2]), "sale-paid");
+const invoiceSummary = buildInvoiceFinancialSummary(state.invoices);
+assert.strictEqual(invoiceSummary.salesTotal, 30);
+assert.strictEqual(invoiceSummary.paidNoDebt, 24);
+assert.strictEqual(invoiceSummary.salePaidAtSale, 24);
+assert.strictEqual(invoiceSummary.saleDebt, 6);
+assert.strictEqual(invoiceSummary.debtSettled, 5);
+assert.strictEqual(invoiceSummary.netCollected, 29);
+const paidInvoiceId = state.invoices[2].id;
+await cancelInvoice(paidInvoiceId);
+const cancelledInvoice = state.invoices.find((invoice) => invoice.id === paidInvoiceId);
+assert.strictEqual(cancelledInvoice.type, "cancelled");
+assert.strictEqual(cancelledInvoice.status, "cancelled");
+assert.strictEqual(cancelledInvoice.cancelledReason, "test reason");
+assert.strictEqual(cancelledInvoice.cancelledOriginal.total, 24);
+const afterCancelSummary = buildInvoiceFinancialSummary(state.invoices);
+assert.strictEqual(afterCancelSummary.salesTotal, 6);
+assert.strictEqual(afterCancelSummary.paidNoDebt, 0);
+assert.strictEqual(afterCancelSummary.saleDebt, 6);
+assert.strictEqual(afterCancelSummary.debtSettled, 5);
+assert.strictEqual(afterCancelSummary.netCollected, 5);
+assert.strictEqual(cashOnHand().methods.cash.current, 5);
+
+const cashBeforeLegacyChange = cashOnHand().methods.cash.current;
+const legacyChangeInvoice = {
+  id: "legacy-change",
+  number: "LEGACY-CHANGE",
+  type: "sale",
+  status: "paid",
+  customerName: "زبون نقدي",
+  items: [{ id: "tea", name: "شاي", qty: 1, price: 10, cost: 1 }],
+  subtotal: 10,
+  total: 10,
+  paid: 10,
+  received: 20,
+  changeReturned: 10,
+  delta: 0,
+  payments: { cash: 20, bank: 0, wallet: 0 },
+  createdAt: new Date().toISOString()
+};
+state.invoices.unshift(legacyChangeInvoice);
+assert.strictEqual(invoicePaymentTotals([legacyChangeInvoice]).cash, 10);
+assert.strictEqual(cashOnHand().methods.cash.current - cashBeforeLegacyChange, 10);
+
+const cashBeforeCancelledLegacy = cashOnHand().methods.cash.current;
+state.invoices.unshift({
+  ...legacyChangeInvoice,
+  id: "legacy-cancelled",
+  number: "LEGACY-CANCELLED",
+  status: "cancelled",
+  cancelledAt: new Date().toISOString(),
+  payments: { cash: 999, bank: 0, wallet: 0 }
+});
+assert.strictEqual(invoicePaymentTotals([state.invoices[0]]).cash, 0);
+assert.strictEqual(cashOnHand().methods.cash.current, cashBeforeCancelledLegacy);
+
+const cashBeforePartialPurchase = cashOnHand().methods.cash.current;
+const partialPurchase = {
+  id: "partial-purchase",
+  method: "cash",
+  amount: 20,
+  paidAmount: 6,
+  createdAt: new Date().toISOString()
+};
+state.purchases.push(partialPurchase);
+assert.strictEqual(purchasePaymentTotals([partialPurchase]).cash, 6);
+assert.strictEqual(reportData({}).purchasePaidTotal, 6);
+assert.strictEqual(cashOnHand().methods.cash.current, cashBeforePartialPurchase - 6);
+
+const cashBeforeSupplierPayment = cashOnHand().methods.cash.current;
+state.supplierPayments = state.supplierPayments || [];
+state.supplierPayments.push({
+  id: "supplier-payment-test",
+  supplier: "مورد تجريبي",
+  method: "cash",
+  amount: 4,
+  createdAt: new Date().toISOString()
+});
+assert.strictEqual(reportData({}).supplierPaymentsTotal, 4);
+assert.strictEqual(cashOnHand().methods.cash.current, cashBeforeSupplierPayment - 4);
+
+const cashBeforeOwnerWithdrawal = cashOnHand().methods.cash.current;
+state.ownerWithdrawals = state.ownerWithdrawals || [];
+state.ownerWithdrawals.push({
+  id: "owner-withdrawal-test",
+  method: "cash",
+  amount: 3,
+  createdAt: new Date().toISOString()
+});
+assert.strictEqual(reportData({}).ownerWithdrawalsTotal, 3);
+assert.strictEqual(cashOnHand().methods.cash.current, cashBeforeOwnerWithdrawal - 3);
 printCustomerDebtList();
 
 rebuildCustomerAccountsFromInvoices(state);
@@ -277,8 +419,13 @@ assert(debtReminderUrl(customer).startsWith("https://wa.me/970591234567?text="))
 
 const health = dataHealthReport(state);
 assert.strictEqual(health.ok, true, health.issues.join(", "));
+})();
 `;
 
-vm.runInContext(scenario, context, { filename: "flow-scenario.js" });
-
-console.log("Business flow scenario passed.");
+(async () => {
+  await vm.runInContext(scenario, context, { filename: "flow-scenario.js" });
+  console.log("Business flow scenario passed.");
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

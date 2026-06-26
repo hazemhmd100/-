@@ -72,6 +72,7 @@ let purchaseUnitAutofillState = {};
 let inventoryDraft = {};
 let menuComponentDraft = [];
 let menuOptionsDraft = [];
+let comboDraft = [];
 let invoiceViewLimit = 100;
 const INVOICE_VIEW_STEP = 100;
 let invoiceEditItemsDraft = [];
@@ -83,7 +84,26 @@ let settlementDebtMode = false;
 let workerConsumptionMode = "worker_price"; // worker_price | salary | free
 let expandedCloseId = null;
 let cashboxAction = null;
-const CASHIER_ALLOWED_VIEWS = new Set(["pos"]);
+const CASHIER_ALLOWED_VIEWS = new Set(["pos", "invoices", "customers"]);
+const MANAGER_ONLY_PERMISSIONS = new Set([
+  "backup.export",
+  "backup.import",
+  "backup.restore",
+  "customer.bulkReminder",
+  "customer.delete",
+  "customer.debtPrint",
+  "customer.export",
+  "customer.import",
+  "customer.manualDebt",
+  "customer.merge",
+  "customer.payout",
+  "customer.price",
+  "invoice.cancel",
+  "invoice.delete",
+  "invoice.edit",
+  "invoice.export",
+  "invoice.import"
+]);
 let currentUserRole = "manager";
 
 function isManagerMode() {
@@ -96,6 +116,17 @@ function isManagerOnlyView(view) {
 
 function canAccessView(view) {
   return isManagerMode() || !isManagerOnlyView(view || "pos");
+}
+
+function canUsePermission(permission) {
+  return isManagerMode() || !MANAGER_ONLY_PERMISSIONS.has(permission);
+}
+
+function requireManagerPermission(permission, label = "هذا الإجراء") {
+  if (canUsePermission(permission)) return true;
+  showToast(`${label} يحتاج صلاحية مدير.`);
+  if (typeof requestManagerAccess === "function") requestManagerAccess(state?.view || "pos");
+  return false;
 }
 
 function ensurePermittedView() {
@@ -112,6 +143,7 @@ const els = {
   orderPanel: $(".order-panel"),
   newOrderButton: $("#newOrderButton"),
   addTableButton: $("#addTableButton"),
+  tableMergeButton: $("#tableMergeButton"),
   deleteTableButton: $("#deleteTableButton"),
   orderSubtitle: $("#orderSubtitle"),
   tableNameInput: $("#tableNameInput"),
@@ -205,11 +237,13 @@ const els = {
   ledgerList: $("#ledgerList"),
   invoiceSearchInput: $("#invoiceSearchInput"),
   invoiceStatusFilter: $("#invoiceStatusFilter"),
+  invoiceTypeFilter: $("#invoiceTypeFilter"),
   invoiceDateFromInput: $("#invoiceDateFromInput"),
   invoiceDateToInput: $("#invoiceDateToInput"),
   invoiceDateSortInput: $("#invoiceDateSortInput"),
   invoiceNetTotal: $("#invoiceNetTotal"),
   invoicePaidTotal: $("#invoicePaidTotal"),
+  invoicePaymentBreakdown: $("#invoicePaymentBreakdown"),
   invoiceNetCount: $("#invoiceNetCount"),
   invoiceEditForm: $("#invoiceEditForm"),
   invoiceEditTitle: $("#invoiceEditTitle"),
@@ -531,7 +565,8 @@ function defaultState() {
     autoBackup: true,
     lastAutoBackup: "",
     supplierPayments: [],
-    loyalty: { enabled: true, perShekel: 1, rewardPoints: 100, rewardValue: 10 }
+    loyalty: { enabled: true, perShekel: 1, rewardPoints: 100, rewardValue: 10 },
+    combos: []
   };
 }
 
@@ -591,7 +626,13 @@ function normalizeState(parsed = {}) {
         rewardPoints: pos(l.rewardPoints, 100),
         rewardValue: pos(l.rewardValue, 10)
       };
-    })()
+    })(),
+    combos: Array.isArray(parsed.combos) ? parsed.combos.map((c) => ({
+      id: c.id || uid("combo"),
+      name: String(c.name || "").trim(),
+      price: Math.max(Number(c.price || 0), 0),
+      items: Array.isArray(c.items) ? c.items.map((ci) => ({ menuItemId: ci.menuItemId || ci.id || "", qty: Math.max(Number(ci.qty || 1), 1) })).filter((ci) => ci.menuItemId) : []
+    })).filter((c) => c.name && c.price > 0 && c.items.length) : []
   };
   next.workers = reconcileWorkers(next.workers, next.workerConsumptions, next.workerTransactions);
   next.tableCount = Math.max(1, Math.floor(Number(next.tableCount || DEFAULT_TABLE_COUNT)));
@@ -606,7 +647,12 @@ function isLedgerCashCustomerName(name) {
   return !cleaned || cleaned === "زبون نقدي";
 }
 
+function invoiceIsCancelled(invoice = {}) {
+  return invoice.type === "cancelled" || invoice.status === "cancelled" || Boolean(invoice.cancelledAt);
+}
+
 function invoiceAccountDelta(invoice = {}) {
+  if (invoiceIsCancelled(invoice)) return 0;
   const delta = Number(invoice.delta);
   if (Number.isFinite(delta)) return delta;
   if (invoice.type === "payment") return -(Number(invoice.paid || 0) + Number(invoice.discount || 0));
@@ -668,6 +714,10 @@ function rebuildCustomerAccountsFromInvoices(data = state) {
 
     invoice.customerId = customer.id;
     invoice.customerName = customer.name;
+    if (invoiceIsCancelled(invoice)) {
+      customer.updatedAt = new Date().toISOString();
+      return;
+    }
     customer.totalBilled += Number(invoice.total || 0);
     customer.totalPaid += invoice.type === "payout" ? -Number(invoice.paid || 0) : Number(invoice.paid || 0);
     customer.balance += invoiceAccountDelta(invoice);
@@ -712,6 +762,7 @@ function customerAccountExpectations(data = state) {
 
   data.invoices.forEach((invoice) => {
     if (!invoice || (isLedgerCashCustomerName(invoice.customerName) && !invoice.customerId)) return;
+    if (invoiceIsCancelled(invoice)) return;
     const key = invoice.customerId || String(invoice.customerName || "").trim();
     if (!key) return;
     const row = result.get(key) || {

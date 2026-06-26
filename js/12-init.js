@@ -48,6 +48,7 @@ function wireEvents() {
   });
 
   els.addTableButton.addEventListener("click", addTable);
+  if (els.tableMergeButton) els.tableMergeButton.addEventListener("click", openTableMergePicker);
   els.deleteTableButton.addEventListener("click", deleteSelectedTable);
 
   els.tableNameInput.addEventListener("input", () => {
@@ -144,6 +145,12 @@ function wireEvents() {
   }
 
   els.menuGrid.addEventListener("click", (event) => {
+    const comboCard = event.target.closest("[data-combo-id]");
+    if (comboCard) {
+      addComboToOrder(comboCard.dataset.comboId);
+      return;
+    }
+
     const sizePickerButton = event.target.closest("[data-menu-size-picker]");
     if (sizePickerButton) {
       event.stopPropagation();
@@ -258,15 +265,31 @@ function wireEvents() {
   els.customerSearchInput.addEventListener("input", renderCustomers);
   els.customerStatusFilter.addEventListener("change", renderCustomers);
   els.customerStatementButton.addEventListener("click", printCustomerStatement);
-  if (els.customerExcelExportButton) els.customerExcelExportButton.addEventListener("click", exportCustomersExcel);
-  if (els.customerDebtPrintButton) els.customerDebtPrintButton.addEventListener("click", printCustomerDebtList);
-  if (els.customerBulkReminderButton) els.customerBulkReminderButton.addEventListener("click", openBulkDebtReminders);
-  if (els.customerExcelImportInput) els.customerExcelImportInput.addEventListener("change", (event) => importCustomersExcel(event.target.files[0]));
+  if (els.customerExcelExportButton) els.customerExcelExportButton.addEventListener("click", () => {
+    if (requireManagerPermission("customer.export", "تصدير العملاء")) exportCustomersExcel();
+  });
+  if (els.customerDebtPrintButton) els.customerDebtPrintButton.addEventListener("click", () => {
+    if (requireManagerPermission("customer.debtPrint", "طباعة قائمة الديون")) printCustomerDebtList();
+  });
+  if (els.customerBulkReminderButton) els.customerBulkReminderButton.addEventListener("click", () => {
+    if (requireManagerPermission("customer.bulkReminder", "رسائل الديون الجماعية")) openBulkDebtReminders();
+  });
+  if (els.customerExcelImportInput) els.customerExcelImportInput.addEventListener("change", (event) => {
+    if (!requireManagerPermission("customer.import", "استيراد العملاء")) {
+      event.target.value = "";
+      return;
+    }
+    importCustomersExcel(event.target.files[0]);
+  });
   const customerWhatsappButton = document.getElementById("customerWhatsappButton");
   if (customerWhatsappButton) customerWhatsappButton.addEventListener("click", () => whatsappReminder(selectedCustomerId));
   if (els.customerEditForm) els.customerEditForm.addEventListener("submit", saveCustomerEditCard);
-  if (els.customerMergeToggleButton) els.customerMergeToggleButton.addEventListener("click", toggleCustomerMergeBox);
-  if (els.customerMergeApplyButton) els.customerMergeApplyButton.addEventListener("click", mergeEditingCustomer);
+  if (els.customerMergeToggleButton) els.customerMergeToggleButton.addEventListener("click", () => {
+    if (requireManagerPermission("customer.merge", "دمج العملاء")) toggleCustomerMergeBox();
+  });
+  if (els.customerMergeApplyButton) els.customerMergeApplyButton.addEventListener("click", () => {
+    if (requireManagerPermission("customer.merge", "دمج العملاء")) mergeEditingCustomer();
+  });
   if (els.customerEditBackdrop) els.customerEditBackdrop.addEventListener("click", closeCustomerEditCard);
   if (els.customerEditCloseButton) els.customerEditCloseButton.addEventListener("click", closeCustomerEditCard);
   if (els.customerEditCancelButton) els.customerEditCancelButton.addEventListener("click", closeCustomerEditCard);
@@ -301,6 +324,7 @@ function wireEvents() {
 
     const deleteButton = event.target.closest("[data-remove-customer]");
     if (deleteButton) {
+      if (!requireManagerPermission("customer.delete", "حذف العميل")) return;
       deleteCustomer(deleteButton.dataset.removeCustomer);
       return;
     }
@@ -313,6 +337,7 @@ function wireEvents() {
   els.settlementForm.addEventListener("submit", recordSettlement);
   if (els.settlementFillBalanceButton) els.settlementFillBalanceButton.addEventListener("click", fillSettlementBalance);
   els.cpAddButton.addEventListener("click", () => {
+    if (!requireManagerPermission("customer.price", "تعديل الأسعار الخاصة")) return;
     const itemId = els.cpItemSelect.value;
     const price = Number(els.cpPriceInput.value);
     if (!selectedCustomerId) { showToast("اختر عميل أولاً."); return; }
@@ -330,6 +355,7 @@ function wireEvents() {
   els.customerPricesList.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-cp-remove]");
     if (!btn || !selectedCustomerId) return;
+    if (!requireManagerPermission("customer.price", "تعديل الأسعار الخاصة")) return;
     removeCustomerItemPrice(selectedCustomerId, btn.dataset.cpRemove);
     showToast("تم حذف السعر الخاص.");
     saveState();
@@ -345,14 +371,25 @@ function wireEvents() {
   els.ledgerList.addEventListener("click", (event) => {
     const editButton = event.target.closest("[data-edit-customer-ledger]");
     if (editButton) {
+      if (!requireManagerPermission("invoice.edit", "تعديل الفاتورة")) return;
       state.view = "invoices";
       render();
       startEditInvoice(editButton.dataset.editCustomerLedger);
       return;
     }
 
+    const cancelButton = event.target.closest("[data-cancel-customer-ledger]");
+    if (cancelButton) {
+      if (!requireManagerPermission("invoice.cancel", "إلغاء الفاتورة")) return;
+      cancelInvoice(cancelButton.dataset.cancelCustomerLedger);
+      return;
+    }
+
     const deleteButton = event.target.closest("[data-delete-customer-ledger]");
-    if (deleteButton) deleteInvoice(deleteButton.dataset.deleteCustomerLedger);
+    if (deleteButton) {
+      if (!requireManagerPermission("invoice.delete", "حذف الفاتورة")) return;
+      deleteInvoice(deleteButton.dataset.deleteCustomerLedger);
+    }
   });
 
   els.settlementModePayment.addEventListener("click", () => {
@@ -360,12 +397,14 @@ function wireEvents() {
     applySettlementMode(getCustomer(selectedCustomerId));
   });
   els.settlementModeDebt.addEventListener("click", () => {
+    if (!requireManagerPermission("customer.manualDebt", "إضافة دين يدوي")) return;
     settlementDebtMode = true;
     applySettlementMode(getCustomer(selectedCustomerId));
   });
   const renderInvoicesFresh = () => { invoiceViewLimit = INVOICE_VIEW_STEP; renderInvoices(); };
   els.invoiceSearchInput.addEventListener("input", renderInvoicesFresh);
   els.invoiceStatusFilter.addEventListener("change", renderInvoicesFresh);
+  if (els.invoiceTypeFilter) els.invoiceTypeFilter.addEventListener("change", renderInvoicesFresh);
   els.invoiceDateFromInput.addEventListener("change", renderInvoicesFresh);
   els.invoiceDateToInput.addEventListener("change", renderInvoicesFresh);
   els.invoiceDateSortInput.addEventListener("change", renderInvoicesFresh);
@@ -385,7 +424,9 @@ function wireEvents() {
   els.reportDateFromInput.addEventListener("change", () => { renderReports(); renderTopItemsAndPeakHours(); });
   els.reportDateToInput.addEventListener("change", () => { renderReports(); renderTopItemsAndPeakHours(); });
   els.dayReportButton.addEventListener("click", printDayReport);
-  els.backupNowButton.addEventListener("click", exportData);
+  els.backupNowButton.addEventListener("click", () => {
+    if (requireManagerPermission("backup.export", "تصدير النسخة الاحتياطية")) exportData();
+  });
   els.backupLaterButton.addEventListener("click", snoozeBackupReminder);
   els.lowStockThresholdInput.addEventListener("change", () => {
     state.lowStockThreshold = Math.max(0, Number(els.lowStockThresholdInput.value || 0));
@@ -453,6 +494,7 @@ function wireEvents() {
 
     const editButton = event.target.closest("[data-edit-invoice]");
     if (editButton) {
+      if (!requireManagerPermission("invoice.edit", "تعديل الفاتورة")) return;
       startEditInvoice(editButton.dataset.editInvoice);
       return;
     }
@@ -463,12 +505,28 @@ function wireEvents() {
       return;
     }
 
+    const cancelButton = event.target.closest("[data-cancel-invoice]");
+    if (cancelButton) {
+      if (!requireManagerPermission("invoice.cancel", "إلغاء الفاتورة")) return;
+      cancelInvoice(cancelButton.dataset.cancelInvoice);
+      return;
+    }
+
     const button = event.target.closest("[data-delete-invoice]");
     if (!button) return;
+    if (!requireManagerPermission("invoice.delete", "حذف الفاتورة")) return;
     deleteInvoice(button.dataset.deleteInvoice);
   });
-  els.invoiceExcelExportButton.addEventListener("click", exportInvoicesExcel);
-  els.invoiceExcelImportInput.addEventListener("change", (event) => importInvoicesExcel(event.target.files[0]));
+  els.invoiceExcelExportButton.addEventListener("click", () => {
+    if (requireManagerPermission("invoice.export", "تصدير الفواتير")) exportInvoicesExcel();
+  });
+  els.invoiceExcelImportInput.addEventListener("change", (event) => {
+    if (!requireManagerPermission("invoice.import", "استيراد الفواتير")) {
+      event.target.value = "";
+      return;
+    }
+    importInvoicesExcel(event.target.files[0]);
+  });
   els.menuExcelExportButton.addEventListener("click", exportMenuExcel);
   els.menuExcelImportInput.addEventListener("change", (event) => importMenuExcel(event.target.files[0]));
 
@@ -495,9 +553,19 @@ function wireEvents() {
     requestManagerAccess();
   });
   if (els.guideShareButton) els.guideShareButton.addEventListener("click", shareBackup);
-  if (els.guideBackupButton) els.guideBackupButton.addEventListener("click", exportData);
-  if (els.guideImportInput) els.guideImportInput.addEventListener("change", (event) => importData(event.target.files[0]));
-  if (els.restoreLatestBackupButton) els.restoreLatestBackupButton.addEventListener("click", restoreLatestLocalBackup);
+  if (els.guideBackupButton) els.guideBackupButton.addEventListener("click", () => {
+    if (requireManagerPermission("backup.export", "تصدير النسخة الاحتياطية")) exportData();
+  });
+  if (els.guideImportInput) els.guideImportInput.addEventListener("change", (event) => {
+    if (!requireManagerPermission("backup.import", "استيراد نسخة احتياطية")) {
+      event.target.value = "";
+      return;
+    }
+    importData(event.target.files[0]);
+  });
+  if (els.restoreLatestBackupButton) els.restoreLatestBackupButton.addEventListener("click", () => {
+    if (requireManagerPermission("backup.restore", "استرجاع نسخة احتياطية")) restoreLatestLocalBackup();
+  });
   if (els.businessNameSaveButton) els.businessNameSaveButton.addEventListener("click", saveBusinessName);
   if (els.businessNameInput) els.businessNameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); saveBusinessName(); } });
 
@@ -581,8 +649,16 @@ function wireEvents() {
     render();
   });
 
-  els.exportButton.addEventListener("click", exportData);
-  els.importInput.addEventListener("change", (event) => importData(event.target.files[0]));
+  els.exportButton.addEventListener("click", () => {
+    if (requireManagerPermission("backup.export", "تصدير النسخة الاحتياطية")) exportData();
+  });
+  els.importInput.addEventListener("change", (event) => {
+    if (!requireManagerPermission("backup.import", "استيراد نسخة احتياطية")) {
+      event.target.value = "";
+      return;
+    }
+    importData(event.target.files[0]);
+  });
   els.purchaseForm.addEventListener("submit", addPurchase);
   els.generalExpenseForm.addEventListener("submit", recordGeneralExpense);
   els.generalExpenseMethodInput.addEventListener("change", () => {
@@ -653,6 +729,24 @@ function wireEvents() {
   els.menuComponentAddButton.addEventListener("click", addMenuComponent);
   const menuOptionAddButton = document.getElementById("menuOptionAddButton");
   if (menuOptionAddButton) menuOptionAddButton.addEventListener("click", addMenuOption);
+
+  // إدارة العروض / الكومبو
+  const comboAddItemButton = document.getElementById("comboAddItemButton");
+  if (comboAddItemButton) comboAddItemButton.addEventListener("click", addComboDraftItem);
+  const comboSaveButton = document.getElementById("comboSaveButton");
+  if (comboSaveButton) comboSaveButton.addEventListener("click", saveCombo);
+  const comboDraftList = document.getElementById("comboDraftList");
+  if (comboDraftList) comboDraftList.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-remove-combo-draft]");
+    if (!btn) return;
+    comboDraft = comboDraft.filter((ci) => ci.menuItemId !== btn.dataset.removeComboDraft);
+    renderComboDraft();
+  });
+  const comboList = document.getElementById("comboList");
+  if (comboList) comboList.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-remove-combo]");
+    if (btn) deleteCombo(btn.dataset.removeCombo);
+  });
   const menuOptionsList = document.getElementById("menuOptionsList");
   if (menuOptionsList) menuOptionsList.addEventListener("click", (event) => {
     const button = event.target.closest("[data-remove-option]");

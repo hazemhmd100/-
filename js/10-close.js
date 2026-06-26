@@ -38,16 +38,17 @@ function periodFinancialSummary(range) {
   const stdRange = toStdRange(range);
   const invoices = state.invoices.filter((inv) => dateMatchesRange(inv, stdRange));
   const purchases = (state.purchases || []).filter((p) => dateMatchesRange(p, stdRange));
+  const supplierPayments = (state.supplierPayments || []).filter((payment) => dateMatchesRange(payment, stdRange));
   const expenses = (state.expenses || []).filter((e) => dateMatchesRange(e, stdRange) && !e.workerId);
 
   // Cash basis: actual cash/bank/wallet received
   const saleCashReceived = invoices
-    .filter((inv) => inv.type === "sale")
-    .reduce((sum, inv) => sum + paymentTotal(inv.payments || {}), 0);
+    .filter((inv) => inv.type === "sale" && !invoiceIsCancelled(inv))
+    .reduce((sum, inv) => sum + paymentTotal(invoiceCashboxPayments(inv)), 0);
   const debtCashReceived = invoices
-    .filter((inv) => inv.type === "payment")
+    .filter((inv) => inv.type === "payment" && !invoiceIsCancelled(inv))
     .reduce((sum, inv) => {
-      const byMethod = paymentTotal(inv.payments || {});
+      const byMethod = paymentTotal(invoiceCashboxPayments(inv));
       return sum + (byMethod > 0 ? byMethod : Number(inv.paid || inv.amount || 0));
     }, 0);
   const workerDrinksPaid = (state.workerConsumptions || [])
@@ -57,24 +58,25 @@ function periodFinancialSummary(range) {
 
   // دفعات مدفوعة للعملاء (أرصدة رجعناها)
   const payoutsPaid = invoices
-    .filter((inv) => inv.type === "payout")
-    .reduce((sum, inv) => sum + Number(inv.paid || 0), 0);
+    .filter((inv) => inv.type === "payout" && !invoiceIsCancelled(inv))
+    .reduce((sum, inv) => sum + paymentTotal(invoiceCashboxPayments(inv)), 0);
 
   // Accrual: total billed (including debt customers)
   const totalBilled = invoices
-    .filter((inv) => inv.type === "sale")
+    .filter((inv) => inv.type === "sale" && !invoiceIsCancelled(inv))
     .reduce((sum, inv) => sum + Number(inv.total || 0), 0);
 
   // الدين الحقيقي غير المقبوض من مبيعات الفترة = مجموع المتبقي (delta) الموجب لكل فاتورة
   const periodUnpaid = invoices
-    .filter((inv) => inv.type === "sale")
+    .filter((inv) => inv.type === "sale" && !invoiceIsCancelled(inv))
     .reduce((sum, inv) => {
       const delta = Number(inv.delta);
       const d = Number.isFinite(delta) ? delta : Number(inv.total || 0) - Number(inv.paid || 0);
       return sum + Math.max(0, d);
     }, 0);
 
-  const totalPurchases = purchases.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const totalPurchases = purchases.reduce((sum, p) => sum + purchasePaidAmount(p), 0);
+  const totalSupplierPayments = supplierPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
   const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
 
   const workers = (state.workers || []).filter((w) => w.active !== false);
@@ -88,7 +90,7 @@ function periodFinancialSummary(range) {
   const totalWorkerSalaryPaid = workerTransactionSummary.salaryPaid;
   const totalWorkerCashOut = totalWorkerAdvances + totalWorkerSalaryPaid;
 
-  const totalOut = totalPurchases + totalExpenses + totalWorkerCashOut + payoutsPaid;
+  const totalOut = totalPurchases + totalSupplierPayments + totalExpenses + totalWorkerCashOut + payoutsPaid;
 
   // فرق الجرد بالفترة: سالب = خسارة (نقص بضاعة)، موجب = زيادة
   const inv = periodInventory(range);
@@ -110,6 +112,7 @@ function periodFinancialSummary(range) {
     workerDrinksPaid,
     totalBilled,
     totalPurchases,
+    totalSupplierPayments,
     totalExpenses,
     totalWorkersDue,
     totalWorkerAdvances,
@@ -259,7 +262,8 @@ function renderPeriodClose() {
   const invDiff = summary.inventoryDiff;
   const hasInvDiff = Math.abs(invDiff) > 0.001;
   const closeOutParts = [
-    { label: "مشتريات", amount: summary.totalPurchases },
+    { label: "مشتريات مدفوعة", amount: summary.totalPurchases },
+    { label: "تسديد موردين", amount: summary.totalSupplierPayments },
     { label: "مصروفات", amount: summary.totalExpenses },
     { label: "سلف عمال", amount: summary.totalWorkerAdvances },
     { label: "قبضات عمال مدفوعة", amount: summary.totalWorkerSalaryPaid },

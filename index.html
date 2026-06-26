@@ -21,7 +21,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800;900&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./styles.css?v=20260624-12" />
+  <link rel="stylesheet" href="./styles.css?v=20260625-09" />
   </head>
   <body>
     <div class="app-shell">
@@ -109,6 +109,9 @@
                   </button>
                   <button class="icon-button" id="addTableButton" type="button" title="إضافة طاولة" aria-label="إضافة طاولة">
                     <span aria-hidden="true">+</span>
+                  </button>
+                  <button class="icon-button table-merge-button" id="tableMergeButton" type="button" title="دمج/نقل الطاولة المحددة" aria-label="دمج أو نقل الطاولة المحددة">
+                    <span aria-hidden="true">⇄</span>
                   </button>
                   <button class="icon-button danger-icon-button" id="deleteTableButton" type="button" title="حذف الطاولة المحددة" aria-label="حذف الطاولة المحددة">
                     <span aria-hidden="true">−</span>
@@ -309,10 +312,10 @@
                 </label>
               </div>
               <div class="customers-excel-row">
-                <button class="secondary-button" id="customerExcelExportButton" type="button">⬇ تصدير Excel</button>
-                <button class="secondary-button" id="customerDebtPrintButton" type="button">🖨 طباعة الديون</button>
-                <button class="secondary-button" id="customerBulkReminderButton" type="button">📲 رسائل الديون</button>
-                <label class="secondary-button customer-import-label">
+                <button class="secondary-button" id="customerExcelExportButton" type="button" data-manager-only>⬇ تصدير Excel</button>
+                <button class="secondary-button" id="customerDebtPrintButton" type="button" data-manager-only>🖨 طباعة الديون</button>
+                <button class="secondary-button" id="customerBulkReminderButton" type="button" data-manager-only>📲 رسائل الديون</button>
+                <label class="secondary-button customer-import-label" data-manager-only>
                   ⬆ استيراد Excel
                   <input id="customerExcelImportInput" type="file" accept=".xls,.xlsx,.html,application/vnd.ms-excel" hidden />
                 </label>
@@ -337,7 +340,7 @@
                   <h3 id="settlementTitle">تسديد دفعة على الحساب</h3>
                   <div class="settlement-mode-toggle" id="settlementModeToggle">
                     <button class="settlement-mode-btn is-active" id="settlementModePayment" type="button">تسديد</button>
-                    <button class="settlement-mode-btn" id="settlementModeDebt" type="button">إضافة دين</button>
+                    <button class="settlement-mode-btn" id="settlementModeDebt" type="button" data-manager-only>إضافة دين</button>
                   </div>
                 </div>
                 <label class="field compact">
@@ -364,10 +367,10 @@
                 <button class="primary-button" id="settlementSubmitButton" type="submit">تسجيل دفعة</button>
               </form>
 
-              <div class="section-title" style="margin-top:14px">
+              <div class="section-title" style="margin-top:14px" data-manager-only>
                 <h3>أسعار خاصة</h3>
               </div>
-              <div class="customer-prices-form">
+              <div class="customer-prices-form" data-manager-only>
                 <label class="field compact">
                   <span>الصنف</span>
                   <select id="cpItemSelect"></select>
@@ -378,7 +381,7 @@
                 </label>
                 <button class="secondary-button" id="cpAddButton" type="button">حفظ</button>
               </div>
-              <div class="customer-prices-list" id="customerPricesList"></div>
+              <div class="customer-prices-list" id="customerPricesList" data-manager-only></div>
 
               <div class="section-title" style="margin-top:14px">
                 <h3>آخر الحركات</h3>
@@ -396,13 +399,13 @@
                 <p>سجل البيع والتسديدات</p>
               </div>
               <div class="toolbar">
-                <button class="secondary-button" id="invoiceExcelExportButton" type="button">تصدير Excel</button>
-                <label class="secondary-button file-button">
+                <button class="secondary-button" id="invoiceExcelExportButton" type="button" data-manager-only>تصدير Excel</button>
+                <label class="secondary-button file-button" data-manager-only>
                   استيراد Excel
                   <input id="invoiceExcelImportInput" type="file" accept=".xls,.html,text/html,application/vnd.ms-excel" />
                 </label>
-                <button class="secondary-button" id="exportButton" type="button">حفظ نسخة احتياطية</button>
-                <label class="secondary-button file-button">
+                <button class="secondary-button" id="exportButton" type="button" data-manager-only>حفظ نسخة احتياطية</button>
+                <label class="secondary-button file-button" data-manager-only>
                   استعادة نسخة
                   <input id="importInput" type="file" accept="application/json" />
                 </label>
@@ -422,6 +425,20 @@
                   <option value="credit">رصيد</option>
                   <option value="payment">دفعة حساب</option>
                   <option value="payout">دفع للعميل</option>
+                  <option value="cancelled">ملغاة</option>
+                  <option value="temporary">صنف مؤقت</option>
+                </select>
+              </label>
+              <label class="field compact">
+                <span>النوع المالي</span>
+                <select id="invoiceTypeFilter">
+                  <option value="all">كل الأنواع</option>
+                  <option value="sale-paid">بيع مباشر مدفوع</option>
+                  <option value="sale-debt">بيع فيه دين</option>
+                  <option value="payment">تسديد دين</option>
+                  <option value="manual-debt">دين يدوي</option>
+                  <option value="sale-credit">بيع صار رصيد</option>
+                  <option value="payout">دفع رصيد للعميل</option>
                   <option value="temporary">صنف مؤقت</option>
                 </select>
               </label>
@@ -443,16 +460,45 @@
             </div>
             <div class="invoice-summary-bar">
               <div>
-                <span>إجمالي الصافي</span>
+                <span>🧾 إجمالي المبيعات</span>
                 <strong id="invoiceNetTotal">₪0</strong>
               </div>
+              <div class="is-good">
+                <span>✅ بيع مباشر مدفوع</span>
+                <strong id="invoiceStatPaidNoDebt">₪0</strong>
+              </div>
+              <div class="is-info">
+                <span>💵 مدفوع وقت البيع</span>
+                <strong id="invoiceStatSalePaidAtSale">₪0</strong>
+              </div>
+              <div class="is-warn">
+                <span>⏳ دين جديد من البيع</span>
+                <strong id="invoiceStatDebt">₪0</strong>
+              </div>
+              <div class="is-info">
+                <span>💳 تسديد ديون</span>
+                <strong id="invoiceStatSettled">₪0</strong>
+              </div>
+              <div class="is-warn">
+                <span>🧾 ديون يدوية</span>
+                <strong id="invoiceStatManualDebt">₪0</strong>
+              </div>
               <div>
-                <span>إجمالي المدفوع</span>
+                <span>🏷 خصومات ديون</span>
+                <strong id="invoiceStatDebtDiscount">₪0</strong>
+              </div>
+              <div class="is-danger">
+                <span>↩ رصيد/دفع للعميل</span>
+                <strong id="invoiceStatCustomerCredit">₪0</strong>
+              </div>
+              <div class="is-total">
+                <span>💰 صافي المقبوض</span>
                 <strong id="invoicePaidTotal">₪0</strong>
               </div>
+              <div class="invoice-method-breakdown" id="invoicePaymentBreakdown"></div>
               <small id="invoiceNetCount">0 فاتورة</small>
             </div>
-            <form class="invoice-edit-form" id="invoiceEditForm" hidden>
+            <form class="invoice-edit-form" id="invoiceEditForm" hidden data-manager-only>
               <div class="section-title">
                 <h3 id="invoiceEditTitle">تعديل فاتورة</h3>
                 <button class="secondary-button" id="invoiceEditCancelButton" type="button">إلغاء</button>
@@ -581,6 +627,18 @@
                 <h3>📈 مبيعات آخر 14 يوم</h3>
               </div>
               <div class="daily-sales-chart" id="reportDailyChart"></div>
+            </section>
+            <section class="panel reports-wide-panel">
+              <div class="section-title">
+                <h3>📊 مقارنة بالشهر الماضي</h3>
+              </div>
+              <div class="report-comparison" id="reportComparison"></div>
+            </section>
+            <section class="panel reports-wide-panel">
+              <div class="section-title">
+                <h3>💰 ربح كل تصنيف</h3>
+              </div>
+              <div class="report-list" id="reportCategoryList"></div>
             </section>
             <section class="panel">
               <div class="section-title">
@@ -1194,6 +1252,39 @@
               <div class="settings-menu-list" id="settingsMenuList"></div>
             </section>
           </div>
+
+          <section class="panel combo-manager-panel">
+            <div class="panel-header">
+              <div>
+                <h2>🎁 العروض / الكومبو</h2>
+                <p>اعمل عرض من عدة أصناف بسعر خاص — بيظهر بشاشة البيع تحت تصنيف "🎁 عروض"</p>
+              </div>
+            </div>
+            <div class="combo-form">
+              <label class="field">
+                <span>اسم العرض</span>
+                <input id="comboNameInput" type="text" placeholder="مثال: عرض الفطور" autocomplete="off" />
+              </label>
+              <label class="field compact">
+                <span>سعر العرض</span>
+                <input id="comboPriceInput" type="number" min="0" step="any" inputmode="decimal" placeholder="₪" />
+              </label>
+              <div class="combo-add-item-row">
+                <label class="field compact">
+                  <span>صنف</span>
+                  <select id="comboItemSelect"></select>
+                </label>
+                <label class="field compact">
+                  <span>الكمية</span>
+                  <input id="comboItemQtyInput" type="number" min="1" step="1" value="1" />
+                </label>
+                <button class="secondary-button" id="comboAddItemButton" type="button">➕ أضف صنف للعرض</button>
+              </div>
+              <div class="combo-draft-list" id="comboDraftList"></div>
+              <button class="primary-button" id="comboSaveButton" type="button">💾 حفظ العرض</button>
+            </div>
+            <div class="combo-list" id="comboList"></div>
+          </section>
         </section>
         <!-- ══════════ إغلاق فترة ══════════ -->
         <section class="view" id="view-close">
@@ -1347,7 +1438,7 @@
             <div class="guide-pin-box">
               <div class="guide-pin-head">
                 <strong>👤 صلاحيات مدير / كاشير</strong>
-                <span>وضع الكاشير يفتح البيع فقط. زر "دخول مدير" يفتح التقارير، الأصناف، المشتريات، الجرد، العمال، والإغلاق بعد إدخال الرمز.</span>
+                <span>وضع الكاشير يفتح البيع والفواتير والعملاء للعمل اليومي. الحذف، التعديل الحساس، الاستيراد والتصدير، الأسعار الخاصة، والتقارير تبقى للمدير بعد إدخال الرمز.</span>
               </div>
             </div>
 
@@ -1539,8 +1630,8 @@
           <span>رقم الجوال</span>
           <input id="customerEditPhoneInput" type="tel" autocomplete="off" placeholder="اختياري" />
         </label>
-        <button class="secondary-button customer-merge-toggle" id="customerMergeToggleButton" type="button">دمج مع عميل آخر</button>
-        <div class="customer-merge-box" id="customerMergeBox" hidden>
+        <button class="secondary-button customer-merge-toggle" id="customerMergeToggleButton" type="button" data-manager-only>دمج مع عميل آخر</button>
+        <div class="customer-merge-box" id="customerMergeBox" hidden data-manager-only>
           <label class="field">
             <span>ادمج هذا العميل داخل</span>
             <select id="customerMergeTargetInput"></select>
@@ -1584,17 +1675,17 @@
       </section>
     </template>
 
-  <script src="./js/01-core.js?v=20260624-10" defer></script>
-  <script src="./js/02-domain.js?v=20260623-04" defer></script>
-  <script src="./js/03-pos.js?v=20260624-04" defer></script>
-  <script src="./js/04-customers-invoices.js?v=20260624-09" defer></script>
+  <script src="./js/01-core.js?v=20260625-03" defer></script>
+  <script src="./js/02-domain.js?v=20260626-02" defer></script>
+  <script src="./js/03-pos.js?v=20260624-15" defer></script>
+  <script src="./js/04-customers-invoices.js?v=20260626-02" defer></script>
   <script src="./js/05-workers.js?v=20260620-09" defer></script>
-  <script src="./js/06-inventory-menu.js?v=20260623-04" defer></script>
-  <script src="./js/07-reports.js?v=20260624-01" defer></script>
-  <script src="./js/08-checkout.js?v=20260623-05" defer></script>
-  <script src="./js/09-actions.js?v=20260624-01" defer></script>
-  <script src="./js/10-close.js?v=20260621-01" defer></script>
-  <script src="./js/11-extras.js?v=20260624-05" defer></script>
-  <script src="./js/12-init.js?v=20260624-10" defer></script>
+  <script src="./js/06-inventory-menu.js?v=20260624-15" defer></script>
+  <script src="./js/07-reports.js?v=20260626-02" defer></script>
+  <script src="./js/08-checkout.js?v=20260625-01" defer></script>
+  <script src="./js/09-actions.js?v=20260625-01" defer></script>
+  <script src="./js/10-close.js?v=20260626-02" defer></script>
+  <script src="./js/11-extras.js?v=20260626-02" defer></script>
+  <script src="./js/12-init.js?v=20260625-03" defer></script>
   </body>
 </html>
