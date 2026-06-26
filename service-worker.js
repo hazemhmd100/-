@@ -1,4 +1,4 @@
-﻿const CACHE_NAME = "cafe-pos-cache-v270";
+﻿const CACHE_NAME = "cafe-pos-cache-v271";
 const ASSETS = [
   "./",
   "./index.html",

@@ -19,7 +19,7 @@ function renderCashOnHand() {
     return `
       <article class="cash-method-card ${m.current >= 0 ? "" : "is-negative"}">
         <div class="cash-method-head">
-          <span>${icon} ${label}</span>
+          <span>${icon} ${label}${key === "cash" ? " <em class=\"cash-card-hint\">= اللي بالدرج</em>" : ""}</span>
           <button class="cash-method-reconcile" type="button" data-reconcile-method="${key}" title="جرد ${label}">⚖</button>
         </div>
         <strong>${money(m.current)}</strong>
@@ -32,7 +32,7 @@ function renderCashOnHand() {
   els.cashOnHandBox.innerHTML = `
     <div class="cashbox-onhand-top">
       <div class="cashbox-onhand-total">
-        <span>💰 إجمالي الفلوس اللي معك</span>
+        <span>💰 إجمالي الفلوس اللي معك <em class="cashbox-total-hint">(كاش + بنك + محفظة معًا — مش الدرج بس)</em></span>
         <strong class="${c.total.current >= 0 ? "is-positive" : "is-negative"}">${money(c.total.current)}</strong>
       </div>
       <div class="cashbox-onhand-actions">

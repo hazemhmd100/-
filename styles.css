@@ -7033,6 +7033,10 @@ html.theme-switching *::after {
 .supplier-debt-row .supplier-credit { color: var(--success); font-weight: 900; font-size: 15px; background: transparent; }
 .supplier-pay-form { margin-bottom: 10px; }
 
+/* تلميحات صندوق "إجمالي الفلوس" */
+.cashbox-total-hint { font-style: normal; font-size: 11px; font-weight: 700; color: var(--muted); opacity: 0.9; }
+.cash-card-hint { font-style: normal; font-size: 10.5px; font-weight: 700; color: var(--muted); margin-inline-start: 4px; }
+
 /* العروض / الكومبو */
 .combo-manager-panel { margin-top: 14px; }
 .combo-form { display: grid; gap: 10px; margin-bottom: 12px; }
