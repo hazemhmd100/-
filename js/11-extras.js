@@ -144,6 +144,7 @@ function renderGuide() {
       : "ما في نسخة بعد — صدّر نسخة واحفظها بمكان آمن";
   }
   renderBackupCenter();
+  if (typeof renderFolderBackupSetting === "function") renderFolderBackupSetting();
   els.guideLive.innerHTML = `
     <article class="guide-live-card"><span>💵 الكاش اللي معك الآن</span><strong>${money(cash)}</strong></article>
     <article class="guide-live-card ${backupClass}"><span>🛡️ النسخ الاحتياطي</span><strong>${backupText}</strong></article>

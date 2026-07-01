@@ -73,8 +73,8 @@ let inventoryDraft = {};
 let menuComponentDraft = [];
 let menuOptionsDraft = [];
 let comboDraft = [];
-let invoiceViewLimit = 100;
-const INVOICE_VIEW_STEP = 100;
+let invoiceViewLimit = 50;
+const INVOICE_VIEW_STEP = 50;
 let invoiceEditItemsDraft = [];
 let editingCustomerId = null;
 let editingMenuItemId = null;
@@ -229,6 +229,7 @@ const els = {
   settlementFillBalanceButton: $("#settlementFillBalanceButton"),
   settlementDiscountField: $("#settlementDiscountField"),
   settlementDiscountInput: $("#settlementDiscountInput"),
+  settlementLossHint: $("#settlementLossHint"),
   settlementMethodInput: $("#settlementMethodInput"),
   settlementMethodField: $("#settlementMethodField"),
   settlementNoteField: $("#settlementNoteField"),
@@ -564,6 +565,7 @@ function defaultState() {
     printSize: "a4",
     autoBackup: true,
     lastAutoBackup: "",
+    lastFolderBackup: "",
     supplierPayments: [],
     loyalty: { enabled: true, perShekel: 1, rewardPoints: 100, rewardValue: 10 },
     combos: []
@@ -616,6 +618,7 @@ function normalizeState(parsed = {}) {
     printSize: ["a4", "80mm", "58mm"].includes(parsed.printSize) ? parsed.printSize : "a4",
     autoBackup: parsed.autoBackup !== false,
     lastAutoBackup: typeof parsed.lastAutoBackup === "string" ? parsed.lastAutoBackup : "",
+    lastFolderBackup: typeof parsed.lastFolderBackup === "string" ? parsed.lastFolderBackup : "",
     supplierPayments: Array.isArray(parsed.supplierPayments) ? parsed.supplierPayments : [],
     loyalty: (() => {
       const l = parsed.loyalty && typeof parsed.loyalty === "object" ? parsed.loyalty : {};
@@ -914,25 +917,31 @@ let localBackupTimer = null;
 let pendingSerialized = null;
 let lastSavedSerialized = null;
 
+let mainSaveTimer = null;
+
+// الحفظ مؤجَّل (debounce): الضغطات/التنقّلات المتتالية تُدمج في حفظة واحدة بدل
+// عمل JSON.stringify لكامل البيانات كل مرة. immediate=true للحفظ الفوري (إغلاق/تصغير).
 function saveState(immediate) {
-  const serialized = JSON.stringify(state);
-  if (serialized === lastSavedSerialized) {
-    if (immediate === true && pendingSerialized) flushBackups();
+  if (immediate === true) {
+    if (mainSaveTimer) { clearTimeout(mainSaveTimer); mainSaveTimer = null; }
+    persistStateNow();
     return;
   }
-  // الحفظ الرئيسي فوري دائمًا (يضمن عدم ضياع البيانات).
+  if (mainSaveTimer) return; // حفظ مجدول أصلاً سيلتقط أحدث حالة عند تنفيذه
+  mainSaveTimer = setTimeout(() => { mainSaveTimer = null; persistStateNow(); }, 400);
+}
+
+function persistStateNow() {
+  const serialized = JSON.stringify(state);
+  if (serialized === lastSavedSerialized) return;
   try {
     localStorage.setItem(STORAGE_KEY, serialized);
     lastSavedSerialized = serialized;
   } catch (error) {
     console.warn("Could not save browser storage", error);
   }
-  // النسخ الاحتياطية (سجل + IndexedDB) ثقيلة، فتُؤجَّل حتى لا تبطّئ كل ضغطة مفتاح.
+  // النسخ الاحتياطية (سجل + IndexedDB) ثقيلة، فتُؤجَّل أكثر.
   pendingSerialized = serialized;
-  if (immediate === true) {
-    flushBackups();
-    return;
-  }
   clearTimeout(localBackupTimer);
   localBackupTimer = setTimeout(flushBackups, 1500);
 }
@@ -1011,6 +1020,47 @@ function openBackupDatabase() {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+}
+
+// ─── تخزين مقبض مجلد النسخ التلقائي (File System Access) في IndexedDB ──
+const BACKUP_DIR_HANDLE_KEY = "backup-dir-handle";
+
+async function saveBackupDirHandle(handle) {
+  const database = await openBackupDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = database.transaction(BACKUP_STORE_NAME, "readwrite");
+    tx.objectStore(BACKUP_STORE_NAME).put({ id: BACKUP_DIR_HANDLE_KEY, handle });
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function loadBackupDirHandle() {
+  try {
+    const database = await openBackupDatabase();
+    return await new Promise((resolve) => {
+      const tx = database.transaction(BACKUP_STORE_NAME, "readonly");
+      const req = tx.objectStore(BACKUP_STORE_NAME).get(BACKUP_DIR_HANDLE_KEY);
+      req.onsuccess = () => resolve(req.result ? req.result.handle : null);
+      req.onerror = () => resolve(null);
+    });
+  } catch (error) {
+    return null;
+  }
+}
+
+async function clearBackupDirHandle() {
+  try {
+    const database = await openBackupDatabase();
+    return await new Promise((resolve) => {
+      const tx = database.transaction(BACKUP_STORE_NAME, "readwrite");
+      tx.objectStore(BACKUP_STORE_NAME).delete(BACKUP_DIR_HANDLE_KEY);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+    });
+  } catch (error) {
+    return false;
+  }
 }
 
 async function writeDurableBackup(snapshot) {

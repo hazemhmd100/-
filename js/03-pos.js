@@ -237,11 +237,16 @@ function renderTables() {
   els.tablesGrid.innerHTML = "";
   const tableCount = getTableCount();
   if (state.selectedTable > tableCount) state.selectedTable = tableCount;
+  const searchEl = document.getElementById("tableSearchInput");
+  const tableQuery = searchEl ? searchEl.value.trim() : "";
+  let shownCount = 0;
   for (let tableId = 1; tableId <= tableCount; tableId += 1) {
     const order = getExistingOrder(tableId);
     const math = order ? orderMath(order) : { total: 0, delta: 0 };
     const tableLabel = getTableLabel(tableId);
     const customerName = getOrderCustomerName(order);
+    if (tableQuery && !searchMatch(`${tableLabel} ${customerName}`, tableQuery)) continue;
+    shownCount += 1;
     const hasOrder = Boolean(order?.items.length);
     const hasDebt = Boolean(hasOrder && math.delta > 0);
     const button = document.createElement("button");
@@ -259,6 +264,9 @@ function renderTables() {
       <span class="table-state ${hasDebt ? "has-debt" : hasOrder ? "is-occupied" : "is-free"}">${hasOrder ? "مستخدمة" : "متاحة"}</span>
     `;
     els.tablesGrid.appendChild(button);
+  }
+  if (tableQuery && shownCount === 0) {
+    els.tablesGrid.innerHTML = `<div class="empty-state">ما في طاولة باسم "${escapeHtml(tableQuery)}". جرّب اسم تاني أو فرّغ البحث.</div>`;
   }
 }
 

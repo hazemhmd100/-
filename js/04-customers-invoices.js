@@ -370,14 +370,20 @@ function renderLedgerItems(invoice) {
   const changeLine = Number(invoice.changeReturned || 0) > 0
     ? `<p class="ledger-note">راجع للعميل: ${money(invoice.changeReturned)}</p>`
     : "";
+  const itemsTotal = invoice.items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.qty || 0), 0);
   return `
-    <div class="ledger-items">
-      ${invoice.items.map((item) => `
-        <span class="${item.temporary ? "is-temporary" : ""}">
-          ${escapeHtml(item.name)} × ${item.qty}
-          ${item.temporary ? "<em>مؤقت</em>" : ""}
-        </span>
-      `).join("")}
+    <div class="ledger-items ledger-items-detailed">
+      ${invoice.items.map((item) => {
+        const qty = Number(item.qty || 0);
+        const price = Number(item.price || 0);
+        const lineTotal = price * qty;
+        return `
+        <div class="ledger-item-line ${item.temporary ? "is-temporary" : ""}">
+          <span class="li-name">${escapeHtml(item.name)}${item.isCombo ? " 🍱" : ""}${item.isCustomPrice ? " ⭐" : ""}${item.temporary ? " <em>مؤقت</em>" : ""}</span>
+          <span class="li-calc">${quantityText(qty)} × ${money(price)} = <b>${money(lineTotal)}</b></span>
+        </div>`;
+      }).join("")}
+      <div class="ledger-items-summary">${invoice.items.length} صنف · إجمالي الأصناف ${money(itemsTotal)}</div>
     </div>
     ${changeLine}
     ${cancellationNote}
@@ -510,15 +516,19 @@ function renderInvoiceFinancialSummary(rows, displayedCount, totalMatchCount, ca
     if (el) el.textContent = money(value);
   };
 
+  // الرصيد الجديد الصافي للعملاء (دفعوا زيادة) = كل "رصيد/دفع" ناقص اللي فعليًا رجع نقدًا (payout)
+  const newCustomerCredit = Math.max(summary.customerCredit - summary.payout, 0);
+
   els.invoiceNetTotal.textContent = money(summary.salesTotal);
   els.invoicePaidTotal.textContent = money(summary.netCollected);
-  setStat("invoiceStatPaidNoDebt", summary.paidNoDebt);
+  setStat("invoiceStatNewDebt", summary.saleDebt + summary.manualDebt);
   setStat("invoiceStatSalePaidAtSale", summary.salePaidAtSale);
-  setStat("invoiceStatDebt", summary.saleDebt);
   setStat("invoiceStatSettled", summary.debtSettled);
+  setStat("invoiceStatPayout", summary.payout);
+  setStat("invoiceStatDebt", summary.saleDebt);
   setStat("invoiceStatManualDebt", summary.manualDebt);
   setStat("invoiceStatDebtDiscount", summary.debtDiscount);
-  setStat("invoiceStatCustomerCredit", summary.customerCredit);
+  setStat("invoiceStatCustomerCredit", newCustomerCredit);
 
   if (els.invoicePaymentBreakdown) {
     els.invoicePaymentBreakdown.innerHTML = `
@@ -641,6 +651,38 @@ function applySettlementMode(customer) {
     els.settlementAmountInput.removeAttribute("max");
     els.settlementDiscountInput.placeholder = hasDebt ? `اختياري حتى ${money(Number(customer.balance || 0))}` : "اختياري";
     if (!hasDebt) els.settlementDiscountInput.value = "";
+  }
+  updateSettlementLossHint(customer);
+}
+
+// يوضّح إذا خصم التسديد أكبر من هامش الربح المتوقع على هالمبلغ (يعني فعليًا خسارة، مش بس تقليل ربح)
+function updateSettlementLossHint(customer) {
+  if (!els.settlementLossHint) return;
+  const payoutMode = customer && Number(customer.balance || 0) < -0.001;
+  const debtMode = settlementDebtMode && !payoutMode;
+  const discount = Math.max(Number(els.settlementDiscountInput.value || 0), 0);
+
+  if (!customer || payoutMode || debtMode || discount <= 0.001) {
+    els.settlementLossHint.hidden = true;
+    els.settlementLossHint.innerHTML = "";
+    return;
+  }
+
+  const amount = Math.max(Number(els.settlementAmountInput.value || 0), 0);
+  const settleValue = amount + discount;
+  const marginRatio = customerMarginRatio(customer);
+  const marginAmount = settleValue * marginRatio;
+  const marginPercentText = `${Math.round(marginRatio * 100)}%`;
+
+  els.settlementLossHint.hidden = false;
+  if (discount > marginAmount + 0.001) {
+    const lossAmount = discount - marginAmount;
+    els.settlementLossHint.className = "settlement-loss-hint is-loss";
+    els.settlementLossHint.innerHTML = `⚠️ هذا الخصم بيخليك تخسر تقريبًا <b>${money(lossAmount)}</b> — أكبر من هامش ربحك التقديري (${marginPercentText}) على هالمبلغ.`;
+  } else {
+    const remainingProfit = marginAmount - discount;
+    els.settlementLossHint.className = "settlement-loss-hint is-ok";
+    els.settlementLossHint.innerHTML = `✅ مش خسارة، بس بينزل من ربحك. ربحك المتبقي التقديري على هالمبلغ ≈ <b>${money(remainingProfit)}</b> (هامش ${marginPercentText}).`;
   }
 }
 
@@ -794,9 +836,12 @@ function renderInvoices() {
       : "";
   }
 
+  const payMethodIcon = { none: "⚠️", cash: "💵", bank: "🏦", wallet: "📱", mixed: "🔀" };
   els.invoiceTableBody.innerHTML = rows.length
-    ? rows.map((invoice) => `
-      <tr>
+    ? rows.map((invoice) => {
+      const payCategory = invoiceIsCancelled(invoice) ? "cancelled" : invoicePaymentCategory(invoice);
+      return `
+      <tr class="invoice-pay-row is-pay-${payCategory}">
         <td>${invoice.number}</td>
         <td>${formatDate(invoice.createdAt)}</td>
         <td>${escapeHtml(invoice.customerName || "زبون نقدي")}</td>
@@ -804,7 +849,7 @@ function renderInvoices() {
         <td class="invoice-items-cell">${renderLedgerItems(invoice)}</td>
         <td>${invoiceTotalDisplay(invoice)}</td>
         <td>${invoicePaidDisplay(invoice)}</td>
-        <td><span class="invoice-payment-method">${escapeHtml(invoicePaymentText(invoice))}</span></td>
+        <td><span class="invoice-payment-method is-pay-${payCategory}">${payCategory !== "cancelled" ? `${payMethodIcon[payCategory] || ""} ` : ""}${escapeHtml(invoicePaymentText(invoice))}</span></td>
         <td class="invoice-note-cell">${invoice.note ? escapeHtml(invoice.note) : "-"}</td>
         <td>
           <div class="invoice-status-cell">
@@ -821,7 +866,8 @@ function renderInvoices() {
           </div>
         </td>
       </tr>
-    `).join("") + moreRow
+    `;
+    }).join("") + moreRow
     : '<tr><td colspan="11"><div class="empty-state">لا توجد فواتير مطابقة.</div></td></tr>';
 }
 

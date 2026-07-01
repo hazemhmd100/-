@@ -3,71 +3,137 @@
 
 function renderPurchases() {
   const query = els.purchaseSearchInput.value.trim().toLowerCase();
-  const purchaseMatches = state.purchases.map((purchase) => purchaseSearchInfo(purchase, query)).filter((match) => match.matches);
+  // فلترة + ترتيب بالتاريخ
+  const fromEl = document.getElementById("purchaseDateFromInput");
+  const toEl = document.getElementById("purchaseDateToInput");
+  const sortEl = document.getElementById("purchaseDateSortInput");
+  const dFrom = fromEl ? fromEl.value : "";
+  const dTo = toEl ? toEl.value : "";
+  const range = {
+    minDate: (dFrom && dTo && dFrom > dTo) ? dTo : dFrom,
+    maxDate: (dFrom && dTo && dFrom > dTo) ? dFrom : dTo
+  };
+  const oldestFirst = sortEl && sortEl.value === "oldest";
+  const dateFiltered = state.purchases
+    .filter((purchase) => invoiceMatchesDateRange(purchase, range))
+    .slice()
+    .sort((a, b) => {
+      const diff = new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+      return oldestFirst ? -diff : diff;
+    });
+  const purchaseMatches = dateFiltered.map((purchase) => purchaseSearchInfo(purchase, query)).filter((match) => match.matches);
   const purchases = purchaseMatches.map((match) => match.purchase);
+  const byMethod = { cash: 0, bank: 0, wallet: 0 };
   const totalAmount = purchaseMatches.reduce((sum, match) => {
-    return sum + (query ? purchaseLinesAmount(match.statLines) : purchaseAmount(match.purchase));
+    const amt = query ? purchaseLinesAmount(match.statLines) : purchaseAmount(match.purchase);
+    const m = paymentMethods.includes(match.purchase.method) ? match.purchase.method : "cash";
+    byMethod[m] += amt;
+    return sum + amt;
   }, 0);
   const searchStats = purchaseSearchSalesStats(purchaseMatches);
 
+  // المصروفات العامة لنفس الفترة (للإجمالي العام)
+  const periodExpenses = (state.expenses || [])
+    .filter((expense) => invoiceMatchesDateRange(expense, range))
+    .filter((expense) => {
+      if (!query) return true;
+      const h = `${expense.title || ""} ${expense.note || ""} ${paymentLabels[expense.method] || expense.method || ""}`;
+      return searchMatch(h, query);
+    });
+  const expensesTotal = periodExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const grandTotal = totalAmount + expensesTotal;
+  const grandByMethod = { cash: byMethod.cash, bank: byMethod.bank, wallet: byMethod.wallet };
+  periodExpenses.forEach((expense) => {
+    const m = paymentMethods.includes(expense.method) ? expense.method : "cash";
+    grandByMethod[m] += Number(expense.amount || 0);
+  });
+
+  const periodText = (range.minDate || range.maxDate)
+    ? `الفترة: ${range.minDate || "البداية"} ← ${range.maxDate || "اليوم"}`
+    : "كل الفترات";
   els.purchaseTotalBox.innerHTML = `
-    <span>${query ? "نتيجة البحث في المشتريات" : "المجموع الكلي"}</span>
+    <span>${query ? "نتيجة البحث في المشتريات" : "إجمالي المشتريات"} — ${periodText}</span>
     <strong>${money(totalAmount)}</strong>
     <small>${purchases.length} فاتورة / سجل</small>
     <div class="purchase-search-stats">
+      <span>💵 كاش: ${money(byMethod.cash)}</span>
+      <span>🏦 بنك: ${money(byMethod.bank)}</span>
+      <span>📱 محفظة: ${money(byMethod.wallet)}</span>
+    </div>
+    <div class="purchase-search-stats purchase-qty-stats">
       <span>${query ? "الأصناف المطابقة" : "الأصناف"}: ${quantityText(searchStats.itemCount)}</span>
-      <span>${query ? "مبلغ الأصناف المطابقة" : "مبلغ المشتريات"}: ${money(totalAmount)}</span>
       <span>الكمية المشتراة: ${quantityText(searchStats.purchaseQty)}</span>
       <span>كمية المخزون الداخلة: ${quantityText(searchStats.stockQty)}</span>
     </div>
+    <div class="purchase-grand-total">
+      <div class="pgt-line"><span>🧾 + مصروفات عامة لنفس الفترة</span><strong>${money(expensesTotal)}</strong></div>
+      <div class="pgt-line pgt-grand"><span>💰 الإجمالي العام (مشتريات + مصروفات)</span><strong>${money(grandTotal)}</strong></div>
+      <div class="pgt-methods">منه: 💵 كاش ${money(grandByMethod.cash)} | 🏦 بنك ${money(grandByMethod.bank)} | 📱 محفظة ${money(grandByMethod.wallet)}</div>
+    </div>
   `;
 
+  const purchasePayIcon = { none: "⚠️", cash: "💵", bank: "🏦", wallet: "📱" };
   els.purchasesList.innerHTML = purchases.length
-    ? purchaseMatches.map((match) => {
-      const purchase = match.purchase;
-      const lines = query ? match.statLines : match.lines;
-      const qtyTotal = lines.reduce((sum, line) => sum + Number(line.qty || 0), 0);
-      const stockQtyTotal = lines.reduce((sum, line) => sum + purchaseLineStockQty(line), 0);
-      const rowAmount = query ? purchaseLinesAmount(lines) : purchaseAmount(purchase);
-      return `
-        <article class="purchase-row ${editingPurchaseId === purchase.id ? "is-editing" : ""}">
-          <header>
-            <div>
-              <strong>${escapeHtml(purchase.number || "سجل مشتريات")}</strong>
-              <p>
-                ${formatDate(purchase.createdAt)} | ${paymentLabels[purchase.method] || purchase.method}${purchase.supplier ? ` | ${escapeHtml(purchase.supplier)}` : ""}
-              </p>
-              <div class="purchase-badges">
-                <span class="purchase-qty-badge">${query ? "الأصناف المطابقة" : "الأصناف"}: ${lines.length}</span>
-                <span>إجمالي الكمية المشتراة: ${quantityText(qtyTotal)}</span>
-                <span>إجمالي كمية المخزون: ${quantityText(stockQtyTotal)}</span>
-                ${query ? `<span>مبلغ الأصناف المطابقة: ${money(rowAmount)}</span>` : ""}
-              </div>
-            </div>
-            <span class="purchase-amount">${money(rowAmount)}</span>
-          </header>
-          <div class="purchase-lines">
-            ${lines.map((line) => `
-              <article class="purchase-line-card">
-                <strong>${escapeHtml(line.item)}</strong>
-                <div>
-                  <span class="purchase-qty-badge">الكمية المشتراة: ${quantityWithUnit(line.qty, line.unit)}</span>
-                  <span>${purchaseLineStockPerUnitText(line)}</span>
-                  <span class="purchase-stock-badge">دخل المخزون: ${purchaseLineStockText(line)}</span>
-                  <span>المبلغ: ${money(line.amount)}</span>
-                  <span>حق وحدة المخزون: ${money(purchaseLineUnitCost(line))}</span>
-                </div>
-              </article>
-            `).join("")}
-          </div>
-          ${purchase.note ? `<p>${escapeHtml(purchase.note)}</p>` : ""}
-          <div class="purchase-row-actions">
-            <button class="invoice-edit-button" type="button" data-edit-purchase="${purchase.id}">تعديل</button>
-            <button class="invoice-delete-button" type="button" data-remove-purchase="${purchase.id}">حذف</button>
-          </div>
-        </article>
-      `;
-    }).join("")
+    ? `<div class="invoice-table-wrap">
+        <table class="invoice-table purchase-table">
+          <thead>
+            <tr>
+              <th>الرقم</th>
+              <th>التاريخ</th>
+              <th>المورد</th>
+              <th>الأصناف والكمية</th>
+              <th>الإجمالي</th>
+              <th>طريقة الدفع</th>
+              <th>الحالة</th>
+              <th>الملاحظة</th>
+              <th>إجراء</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${purchaseMatches.map((match) => {
+              const purchase = match.purchase;
+              const lines = query ? match.statLines : match.lines;
+              const qtyTotal = lines.reduce((sum, line) => sum + Number(line.qty || 0), 0);
+              const stockQtyTotal = lines.reduce((sum, line) => sum + purchaseLineStockQty(line), 0);
+              const rowAmount = query ? purchaseLinesAmount(lines) : purchaseAmount(purchase);
+              const debt = purchaseSupplierDebt(purchase);
+              const payCategory = debt > 0.001 ? "none" : (paymentMethods.includes(purchase.method) ? purchase.method : "cash");
+              return `
+                <tr class="invoice-pay-row is-pay-${payCategory} ${editingPurchaseId === purchase.id ? "is-editing-row" : ""}">
+                  <td>${escapeHtml(purchase.number || "سجل مشتريات")}</td>
+                  <td>${formatDate(purchase.createdAt)}</td>
+                  <td>${purchase.supplier ? escapeHtml(purchase.supplier) : "-"}</td>
+                  <td class="invoice-items-cell">
+                    <div class="ledger-items ledger-items-detailed">
+                      ${lines.map((line) => `
+                        <div class="ledger-item-line">
+                          <span class="li-name">${escapeHtml(line.item)}</span>
+                          <span class="li-calc">${quantityWithUnit(line.qty, line.unit)} · دخل المخزون ${purchaseLineStockText(line)} = <b>${money(line.amount)}</b></span>
+                        </div>
+                      `).join("")}
+                      <div class="ledger-items-summary">${lines.length} صنف · كمية ${quantityText(qtyTotal)} · مخزون داخل ${quantityText(stockQtyTotal)}</div>
+                    </div>
+                  </td>
+                  <td>${money(rowAmount)}</td>
+                  <td><span class="invoice-payment-method is-pay-${payCategory}">${purchasePayIcon[payCategory] || ""} ${escapeHtml(paymentLabels[purchase.method] || purchase.method || "-")}</span></td>
+                  <td>
+                    ${debt > 0.001
+                      ? `<span class="balance-badge debt">دين ${money(debt)}</span>`
+                      : `<span class="balance-badge clear">مدفوعة بالكامل</span>`}
+                  </td>
+                  <td class="invoice-note-cell">${purchase.note ? escapeHtml(purchase.note) : "-"}</td>
+                  <td>
+                    <div class="invoice-actions-cell">
+                      <button class="invoice-edit-button" type="button" data-edit-purchase="${purchase.id}">تعديل</button>
+                      <button class="invoice-delete-button" type="button" data-remove-purchase="${purchase.id}">حذف</button>
+                    </div>
+                  </td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>`
     : '<div class="empty-state">لا توجد مشتريات مسجلة بعد.</div>';
 
   renderGeneralExpenses();
@@ -81,19 +147,39 @@ function renderGeneralExpenses() {
     : getLastPaymentMethod();
 
   const query = els.purchaseSearchInput.value.trim().toLowerCase();
+  // نفس فلتر التاريخ المستخدم بالمشتريات
+  const fromEl = document.getElementById("purchaseDateFromInput");
+  const toEl = document.getElementById("purchaseDateToInput");
+  const dFrom = fromEl ? fromEl.value : "";
+  const dTo = toEl ? toEl.value : "";
+  const range = {
+    minDate: (dFrom && dTo && dFrom > dTo) ? dTo : dFrom,
+    maxDate: (dFrom && dTo && dFrom > dTo) ? dFrom : dTo
+  };
   const expenses = (state.expenses || [])
+    .filter((expense) => invoiceMatchesDateRange(expense, range))
     .filter((expense) => {
       if (!query) return true;
       const haystack = `${expense.title || ""} ${expense.note || ""} ${paymentLabels[expense.method] || expense.method || ""}`;
       return searchMatch(haystack, query);
     })
     .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-  const total = expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const expByMethod = { cash: 0, bank: 0, wallet: 0 };
+  const total = expenses.reduce((sum, expense) => {
+    const m = paymentMethods.includes(expense.method) ? expense.method : "cash";
+    expByMethod[m] += Number(expense.amount || 0);
+    return sum + Number(expense.amount || 0);
+  }, 0);
 
   els.generalExpenseTotalBox.innerHTML = `
     <span>${query ? "نتيجة البحث في المصروفات" : "إجمالي المصروفات العامة"}</span>
     <strong>${money(total)}</strong>
     <small>${expenses.length} مصروف</small>
+    <div class="purchase-search-stats">
+      <span>💵 كاش: ${money(expByMethod.cash)}</span>
+      <span>🏦 بنك: ${money(expByMethod.bank)}</span>
+      <span>📱 محفظة: ${money(expByMethod.wallet)}</span>
+    </div>
   `;
 
   els.generalExpensesList.innerHTML = expenses.length

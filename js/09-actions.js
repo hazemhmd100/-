@@ -313,6 +313,112 @@ function renderAutoBackupSetting() {
   if (status) status.textContent = state.lastAutoBackup ? `آخر نسخة تلقائية: ${state.lastAutoBackup}` : "ما تم أخذ نسخة تلقائية بعد.";
 }
 
+// ─── النسخ الاحتياطي التلقائي لمجلد حقيقي (File System Access) ──────
+function folderBackupSupported() {
+  return typeof window.showDirectoryPicker === "function";
+}
+
+async function ensureFolderPermission(handle, interactive) {
+  if (!handle || typeof handle.queryPermission !== "function") return false;
+  const opts = { mode: "readwrite" };
+  let perm = await handle.queryPermission(opts);
+  if (perm === "granted") return true;
+  if (interactive && typeof handle.requestPermission === "function") {
+    perm = await handle.requestPermission(opts);
+    return perm === "granted";
+  }
+  return false;
+}
+
+async function chooseBackupFolder() {
+  if (!folderBackupSupported()) {
+    showToast("متصفحك ما يدعم الحفظ التلقائي لمجلد — استخدم \"حفظ نسخة\" أو إرسال واتساب.");
+    return;
+  }
+  try {
+    const handle = await window.showDirectoryPicker({ mode: "readwrite", id: "cafe-pos-backup" });
+    await saveBackupDirHandle(handle);
+    showToast("تم اختيار مجلد النسخ التلقائي. 📁");
+    await writeBackupToFolder(true);
+    renderFolderBackupSetting();
+  } catch (error) {
+    if (error && error.name === "AbortError") return;
+    console.warn("chooseBackupFolder failed", error);
+    showToast("تعذّر اختيار المجلد.");
+  }
+}
+
+async function disableFolderBackup() {
+  await clearBackupDirHandle();
+  showToast("تم إيقاف الحفظ التلقائي للمجلد.");
+  renderFolderBackupSetting();
+}
+
+async function writeBackupToFolder(interactive) {
+  const handle = await loadBackupDirHandle();
+  if (!handle) { if (interactive) showToast("اختر مجلد أولاً."); return false; }
+  const ok = await ensureFolderPermission(handle, interactive);
+  if (!ok) { if (interactive) showToast("لازم تسمح للبرنامج بالكتابة في المجلد."); return false; }
+  try {
+    const name = (typeof businessName === "function" ? businessName() : "cafe-pos").replace(/[\\/:*?"<>|]/g, "").trim() || "cafe-pos";
+    const today = todayDateInputValue();
+    const fileHandle = await handle.getFileHandle(`${name}-auto-${today}.json`, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(backupPayload());
+    await writable.close();
+    state.lastFolderBackup = today;
+    if (typeof markBackupDone === "function") markBackupDone();
+    saveState(true);
+    if (interactive) showToast("تم حفظ النسخة في المجلد. ✓");
+    renderFolderBackupSetting();
+    return true;
+  } catch (error) {
+    console.warn("writeBackupToFolder failed", error);
+    if (interactive) showToast("تعذّر الكتابة في المجلد. تأكد إنه موجود وفيه صلاحية.");
+    return false;
+  }
+}
+
+async function maybeDailyFolderBackup() {
+  if (!folderBackupSupported()) return;
+  const handle = await loadBackupDirHandle();
+  if (!handle) return;
+  if (state.lastFolderBackup === todayDateInputValue()) return;
+  if (!hasAnyData()) return;
+  const ok = await ensureFolderPermission(handle, false);
+  if (!ok) { renderFolderBackupSetting(); return; }
+  await writeBackupToFolder(false);
+}
+
+async function renderFolderBackupSetting() {
+  const status = document.getElementById("folderBackupStatus");
+  const chooseBtn = document.getElementById("folderBackupChooseButton");
+  const disableBtn = document.getElementById("folderBackupDisableButton");
+  if (!status) return;
+  if (!folderBackupSupported()) {
+    status.textContent = "غير مدعوم بهذا المتصفح — استخدم \"حفظ نسخة\" أو واتساب.";
+    if (chooseBtn) chooseBtn.disabled = true;
+    if (disableBtn) disableBtn.hidden = true;
+    return;
+  }
+  const handle = await loadBackupDirHandle();
+  if (!handle) {
+    status.textContent = "غير مفعّل — اختر مجلد (يفضّل مجلد Google Drive) ليُحفظ تلقائيًا كل يوم.";
+    if (chooseBtn) chooseBtn.textContent = "📁 اختر مجلد النسخ التلقائي";
+    if (disableBtn) disableBtn.hidden = true;
+    return;
+  }
+  const granted = await ensureFolderPermission(handle, false);
+  const folderName = handle.name || "المجلد المختار";
+  if (granted) {
+    status.textContent = `مفعّل على "${folderName}"${state.lastFolderBackup ? ` — آخر حفظ: ${state.lastFolderBackup}` : ""}`;
+  } else {
+    status.textContent = `مفعّل على "${folderName}" — اضغط "اختر مجلد" مرة لإعادة تفعيل الصلاحية.`;
+  }
+  if (chooseBtn) chooseBtn.textContent = "📁 تغيير المجلد / إعادة تفعيل";
+  if (disableBtn) disableBtn.hidden = false;
+}
+
 async function shareBackup() {
   const payload = backupPayload();
   const fileName = backupFileName();

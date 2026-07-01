@@ -382,28 +382,47 @@ function renderReports() {
   els.reportRangeText.textContent = rangeText(range);
 
   // ── حساب الصندوق: شو دخل وشو طلع ──
-  const paymentsReceived = data.paymentInvoices.reduce((sum, invoice) => sum + Number(invoice.paid || 0), 0);
   const paymentDiscountTotal = Number(data.paymentDiscountTotal || 0);
-  const payoutsPaid = data.payoutInvoices.reduce((sum, invoice) => sum + Number(invoice.paid || 0), 0);
-  const workerDrinksPaid = paymentMethods.reduce((sum, method) => sum + Number(data.workerPayments[method] || 0), 0);
-  const cashIn = data.paidTotal + paymentsReceived + workerDrinksPaid;
-  const cashOut = data.purchasePaidTotal + data.supplierPaymentsTotal + data.expensesTotal
-    + data.workerTransactionSummary.advances + data.workerTransactionSummary.salaryPaid
-    + payoutsPaid + data.ownerWithdrawalsTotal;
+  // دفعات العملاء (payout) لكل طريقة دفع
+  const payoutPayments = invoicePaymentTotals(data.payoutInvoices);
+  const sumMethods = (obj) => paymentMethods.reduce((sum, method) => sum + Number((obj || {})[method] || 0), 0);
+
+  // ── صافي الصندوق لكل طريقة دفع على حدة (الكاش = الدرج فقط) ──
+  const boxIn = {};
+  const boxOut = {};
+  const boxNet = {};
+  paymentMethods.forEach((method) => {
+    boxIn[method] = Number(data.salePayments[method] || 0)
+      + Number(data.paymentPayments[method] || 0)
+      + Number(data.workerPayments[method] || 0);
+    boxOut[method] = Number(data.purchasePayments[method] || 0)
+      + Number(data.supplierPaymentPayments[method] || 0)
+      + Number(data.expensePayments[method] || 0)
+      + Number(data.workerTransactionPayments[method] || 0)
+      + Number(payoutPayments[method] || 0)
+      + Number(data.ownerWithdrawalPayments[method] || 0);
+    boxNet[method] = boxIn[method] - boxOut[method];
+  });
+
+  const paymentsReceived = sumMethods(data.paymentPayments);
+  const payoutsPaid = sumMethods(payoutPayments);
+  const workerDrinksPaid = sumMethods(data.workerPayments);
+  const cashIn = paymentMethods.reduce((sum, method) => sum + boxIn[method], 0);
+  const cashOut = paymentMethods.reduce((sum, method) => sum + boxOut[method], 0);
   const cashNet = cashIn - cashOut;
   const cashInParts = [
-    { label: "مقبوض البيع", amount: data.paidTotal },
+    { label: "مقبوض البيع", amount: sumMethods(data.salePayments) },
     { label: "تسديد ديون", amount: paymentsReceived },
     { label: "مشروبات عمال", amount: workerDrinksPaid }
   ];
   const cashOutParts = [
-    { label: "مشتريات مدفوعة", amount: data.purchasePaidTotal },
-    { label: "تسديد موردين", amount: data.supplierPaymentsTotal },
-    { label: "مصروفات عامة", amount: data.expensesTotal },
+    { label: "مشتريات مدفوعة", amount: sumMethods(data.purchasePayments) },
+    { label: "تسديد موردين", amount: sumMethods(data.supplierPaymentPayments) },
+    { label: "مصروفات عامة", amount: sumMethods(data.expensePayments) },
     { label: "سلف عمال", amount: data.workerTransactionSummary.advances },
     { label: "قبضات عمال مدفوعة", amount: data.workerTransactionSummary.salaryPaid },
     { label: "دفعات لعملاء", amount: payoutsPaid },
-    { label: "سحب حصة", amount: data.ownerWithdrawalsTotal }
+    { label: "سحب حصة", amount: sumMethods(data.ownerWithdrawalPayments) }
   ];
 
   const inventoryNet = Number(data.inventorySummary.net || 0);
@@ -459,17 +478,26 @@ function renderReports() {
 
     <div class="cashbox-card ${cashNet >= 0 ? "is-positive" : "is-negative"}">
       <div class="cashbox-main">
-        <span>💰 المفروض زاد صندوقي هالفترة</span>
+        <span>💰 صافي الصندوق كامل (كل الطرق) هالفترة</span>
         <strong>${money(cashNet)}</strong>
-        <small>اللي بالصندوق الآن = هذا الرقم + اللي كان موجود أول الفترة</small>
+        <small>كاش + بنك + محفظة معًا · دخل ${money(cashIn)} − طلع ${money(cashOut)}</small>
+      </div>
+      <div class="cashbox-methods">
+        ${paymentMethods.map((method) => `
+          <div class="cashbox-method ${boxNet[method] >= 0 ? "is-up" : "is-down"}">
+            <span>${paymentLabels[method]}${method === "cash" ? " · الدرج" : ""}</span>
+            <strong>${boxNet[method] >= 0 ? "+" : "−"}${money(Math.abs(boxNet[method]))}</strong>
+            <small>دخل ${money(boxIn[method])} · طلع ${money(boxOut[method])}</small>
+          </div>
+        `).join("")}
       </div>
       <div class="cashbox-breakdown">
         <div class="cashbox-flow cashbox-in">
-          <strong>⬇ دخل: ${money(cashIn)}</strong>
+          <strong>⬇ إجمالي الداخل (كل الطرق): ${money(cashIn)}</strong>
           <small>${moneyPartsText(cashInParts, "لا يوجد دخل")}</small>
         </div>
         <div class="cashbox-flow cashbox-out">
-          <strong>⬆ طلع: ${money(cashOut)}</strong>
+          <strong>⬆ إجمالي الطالع (كل الطرق): ${money(cashOut)}</strong>
           <small>${moneyPartsText(cashOutParts, "لا يوجد طالع")}</small>
         </div>
       </div>
@@ -538,39 +566,45 @@ function renderReports() {
     </div>
   `;
 
-  const saleMethodTotal = paymentMethods.reduce((sum, method) => sum + Number(data.salePayments[method] || 0), 0);
+  const methodIcon = { cash: "💵", bank: "🏦", wallet: "📱" };
   els.reportPaymentsList.innerHTML = `
-    <div class="pay-method-section">
-      <h5>🛒 مقبوض البيع حسب الطريقة</h5>
-      <div class="pay-method-grid">
-        ${paymentMethods.map((method) => `
-          <article class="pay-method-card">
-            <span>${paymentLabels[method]}</span>
-            <strong>${money(data.salePayments[method])}</strong>
-            <small>${saleMethodTotal > 0 ? Math.round((Number(data.salePayments[method] || 0) / saleMethodTotal) * 100) : 0}%</small>
-          </article>
-        `).join("")}
-      </div>
-    </div>
-    <div class="pay-method-section">
-      <h5>📋 تفصيل كل الحركات حسب الطريقة</h5>
-      ${paymentMethods.map((method) => `
-        <article class="report-row">
-          <div>
-            <strong>${paymentLabels[method]}</strong>
-            <small>${moneyPartsText([
-              { label: "بيع", amount: data.salePayments[method] },
-              { label: "تسديد ديون", amount: data.paymentPayments[method] },
-              { label: "مشروبات عمال", amount: data.workerPayments[method] },
-              { label: "سلف/قبضات مدفوعة", amount: data.workerTransactionPayments[method] },
-              { label: "مصروفات عامة", amount: data.expensePayments[method] },
-              { label: "تسديد موردين", amount: data.supplierPaymentPayments[method] },
-              { label: "سحب حصة", amount: data.ownerWithdrawalPayments[method] }
-            ])}</small>
+    <p class="method-ledger-intro">كل طريقة دفع لحالها — وين راح كل شيكل: شو دخل وشو طلع والصافي.</p>
+    <div class="method-ledger">
+      ${paymentMethods.map((method) => {
+        const inRows = [
+          { label: "مبيعات", amount: data.salePayments[method] },
+          { label: "تسديد ديون عملاء", amount: data.paymentPayments[method] },
+          { label: "مشروبات عمال", amount: data.workerPayments[method] }
+        ].filter((row) => Number(row.amount || 0) > 0.001);
+        const outRows = [
+          { label: "مشتريات", amount: data.purchasePayments[method] },
+          { label: "تسديد موردين", amount: data.supplierPaymentPayments[method] },
+          { label: "مصروفات عامة", amount: data.expensePayments[method] },
+          { label: "سلف/قبضات عمال", amount: data.workerTransactionPayments[method] },
+          { label: "دفعات لعملاء", amount: payoutPayments[method] },
+          { label: "سحب حصة", amount: data.ownerWithdrawalPayments[method] }
+        ].filter((row) => Number(row.amount || 0) > 0.001);
+        const lineHtml = (rows, empty) => rows.length
+          ? rows.map((row) => `<div class="ledger-line"><span>${row.label}</span><b>${money(row.amount)}</b></div>`).join("")
+          : `<div class="ledger-empty">${empty}</div>`;
+        return `
+        <article class="ledger-card ${boxNet[method] >= 0 ? "is-up" : "is-down"}">
+          <header class="ledger-head">
+            <span class="ledger-title">${methodIcon[method] || "•"} ${paymentLabels[method]}${method === "cash" ? " · الدرج" : ""}</span>
+            <strong class="ledger-net">${boxNet[method] >= 0 ? "الصافي +" : "الصافي −"}${money(Math.abs(boxNet[method]))}</strong>
+          </header>
+          <div class="ledger-cols">
+            <div class="ledger-col ledger-in">
+              <h6>⬇ دخل ${money(boxIn[method])}</h6>
+              ${lineHtml(inRows, "لا يوجد دخل")}
+            </div>
+            <div class="ledger-col ledger-out">
+              <h6>⬆ طلع ${money(boxOut[method])}</h6>
+              ${lineHtml(outRows, "لا يوجد طالع")}
+            </div>
           </div>
-          <span>${Number(data.purchasePayments[method] || 0) > 0.001 ? `مشتريات: ${money(data.purchasePayments[method])}` : ""}</span>
-        </article>
-      `).join("")}
+        </article>`;
+      }).join("")}
     </div>`;
 
   els.reportItemsList.innerHTML = itemRows.length

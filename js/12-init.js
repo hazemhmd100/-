@@ -29,6 +29,9 @@ function wireEvents() {
     if (button) selectTable(button.dataset.table);
   });
 
+  const tableSearchInput = document.getElementById("tableSearchInput");
+  if (tableSearchInput) tableSearchInput.addEventListener("input", renderTables);
+
   els.newOrderButton.addEventListener("click", () => {
     state.openOrders[String(state.selectedTable)] = {
       id: uid("order"),
@@ -401,6 +404,9 @@ function wireEvents() {
     settlementDebtMode = true;
     applySettlementMode(getCustomer(selectedCustomerId));
   });
+  const refreshSettlementLossHint = () => updateSettlementLossHint(getCustomer(selectedCustomerId));
+  els.settlementAmountInput.addEventListener("input", refreshSettlementLossHint);
+  els.settlementDiscountInput.addEventListener("input", refreshSettlementLossHint);
   const renderInvoicesFresh = () => { invoiceViewLimit = INVOICE_VIEW_STEP; renderInvoices(); };
   els.invoiceSearchInput.addEventListener("input", renderInvoicesFresh);
   els.invoiceStatusFilter.addEventListener("change", renderInvoicesFresh);
@@ -566,6 +572,17 @@ function wireEvents() {
   if (els.restoreLatestBackupButton) els.restoreLatestBackupButton.addEventListener("click", () => {
     if (requireManagerPermission("backup.restore", "استرجاع نسخة احتياطية")) restoreLatestLocalBackup();
   });
+  // النسخ التلقائي لمجلد
+  const folderBackupChooseButton = document.getElementById("folderBackupChooseButton");
+  if (folderBackupChooseButton) folderBackupChooseButton.addEventListener("click", () => {
+    if (requireManagerPermission("backup.export", "إعداد النسخ التلقائي للمجلد")) chooseBackupFolder();
+  });
+  const folderBackupNowButton = document.getElementById("folderBackupNowButton");
+  if (folderBackupNowButton) folderBackupNowButton.addEventListener("click", () => {
+    if (requireManagerPermission("backup.export", "حفظ نسخة للمجلد")) writeBackupToFolder(true);
+  });
+  const folderBackupDisableButton = document.getElementById("folderBackupDisableButton");
+  if (folderBackupDisableButton) folderBackupDisableButton.addEventListener("click", disableFolderBackup);
   if (els.businessNameSaveButton) els.businessNameSaveButton.addEventListener("click", saveBusinessName);
   if (els.businessNameInput) els.businessNameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); saveBusinessName(); } });
 
@@ -686,6 +703,10 @@ function wireEvents() {
     if (button) removePurchaseDraftLine(button.dataset.removePurchaseDraft);
   });
   els.purchaseSearchInput.addEventListener("input", renderPurchases);
+  ["purchaseDateFromInput", "purchaseDateToInput", "purchaseDateSortInput"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("change", renderPurchases);
+  });
   els.purchasesList.addEventListener("click", (event) => {
     const editButton = event.target.closest("[data-edit-purchase]");
     if (editButton) {
@@ -831,6 +852,7 @@ renderAutoBackupSetting();
 showLockScreen();
 recoverFromDurableBackup();
 setTimeout(() => { try { maybeAutoDailyBackup(); } catch (error) {} }, 1800);
+setTimeout(() => { try { maybeDailyFolderBackup(); } catch (error) {} }, 2200);
 
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
   let refreshing = false;

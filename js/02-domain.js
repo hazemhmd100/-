@@ -451,6 +451,15 @@ function invoicePaymentText(invoice) {
   return `${paidMethods.map((method) => `${paymentLabels[method] || method}: ${money(payments[method])}`).join("، ")}${changeText}`;
 }
 
+// تصنيف طريقة دفع الفاتورة لتمييزها بصريًا: بدون دفع / كاش / بنك / محفظة / متعددة
+function invoicePaymentCategory(invoice = {}) {
+  const payments = invoiceCashboxPayments(invoice);
+  const paidMethods = paymentMethods.filter((method) => Number(payments[method] || 0) > 0.001);
+  if (!paidMethods.length) return "none";
+  if (paidMethods.length > 1) return "mixed";
+  return paidMethods[0];
+}
+
 function invoiceLineGross(item) {
   return Number(item.price || 0) * Number(item.qty || 0);
 }
@@ -468,6 +477,23 @@ function invoiceItemProfit(invoice) {
   return (invoice.items || []).reduce((sum, item) => {
     return sum + invoiceLineNet(invoice, item) - Number(item.cost || 0) * Number(item.qty || 0);
   }, 0);
+}
+
+// نسبة هامش الربح (ربح/مبيعات) لعميل معيّن من فواتير بيعه الفعلية؛ لو ما عندو مبيعات (دين يدوي مثلاً) بترجع متوسط هامش المحل كله كتقدير.
+function salesMarginRatio(invoices = []) {
+  const revenue = invoices.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
+  const cost = invoices.reduce((sum, invoice) => {
+    return sum + (invoice.items || []).reduce((lineSum, item) => lineSum + Number(item.cost || 0) * Number(item.qty || 0), 0);
+  }, 0);
+  return revenue > 0.001 ? Math.max(Math.min((revenue - cost) / revenue, 1), 0) : null;
+}
+
+function customerMarginRatio(customer) {
+  const customerSales = state.invoices.filter((invoice) => invoice.customerId === customer?.id && invoice.type === "sale" && !invoiceIsCancelled(invoice));
+  const customerRatio = salesMarginRatio(customerSales);
+  if (customerRatio !== null) return customerRatio;
+  const shopSales = state.invoices.filter((invoice) => invoice.type === "sale" && !invoiceIsCancelled(invoice));
+  return salesMarginRatio(shopSales) ?? 0;
 }
 
 function cloneInvoiceItem(item) {
